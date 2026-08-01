@@ -1,103 +1,14 @@
 "use client";
-
-import { useEffect, useMemo, useRef, useState } from "react";
-
-type Tx = { id: string; date: string; description: string; amount: number; category: string };
-
-const demo: Tx[] = [
-  { id: "1", date: "2026-07-31", description: "Salary · Acme Studio", amount: 6240, category: "Income" },
-  { id: "2", date: "2026-07-30", description: "Woolworths Metro", amount: -146.82, category: "Groceries" },
-  { id: "3", date: "2026-07-29", description: "Domain Rent", amount: -2140, category: "Housing" },
-  { id: "4", date: "2026-07-28", description: "Opal Travel", amount: -48.60, category: "Transport" },
-  { id: "5", date: "2026-07-27", description: "The Grounds", amount: -62.40, category: "Dining" },
-  { id: "6", date: "2026-07-25", description: "AGL Energy", amount: -184.30, category: "Bills" },
-  { id: "7", date: "2026-07-24", description: "Spotify", amount: -13.99, category: "Subscriptions" },
-  { id: "8", date: "2026-07-23", description: "Chemist Warehouse", amount: -38.50, category: "Health" },
-  { id: "9", date: "2026-07-20", description: "Freelance payment", amount: 720, category: "Income" },
-  { id: "10", date: "2026-07-18", description: "Bunnings", amount: -96.75, category: "Shopping" },
-];
-
-const budget: Record<string, number> = { Housing: 2300, Groceries: 700, Dining: 350, Transport: 240, Bills: 450, Shopping: 300, Health: 180, Subscriptions: 80 };
-const colours: Record<string, string> = { Housing: "#625bf6", Groceries: "#22a06b", Dining: "#f08b3e", Transport: "#2f80ed", Bills: "#e6566f", Shopping: "#9b51e0", Health: "#20a4a8", Subscriptions: "#8390a5" };
-const money = (n: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
-
-function guessCategory(text: string) {
-  const s = text.toLowerCase();
-  if (/salary|payroll|payment received|deposit/.test(s)) return "Income";
-  if (/rent|mortgage|domain/.test(s)) return "Housing";
-  if (/woolworths|coles|aldi|iga|grocer/.test(s)) return "Groceries";
-  if (/opal|uber|petrol|transport|metro/.test(s)) return "Transport";
-  if (/restaurant|cafe|coffee|grounds|mcdonald|doordash/.test(s)) return "Dining";
-  if (/agl|energy|telstra|optus|water|insurance/.test(s)) return "Bills";
-  if (/spotify|netflix|apple.com|subscription/.test(s)) return "Subscriptions";
-  if (/chemist|medical|health|pharmacy/.test(s)) return "Health";
-  return "Shopping";
-}
-
-function parseCsv(csv: string): Tx[] {
-  const lines = csv.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error("No transactions found");
-  const split = (line: string) => line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(v => v.trim().replace(/^\"|\"$/g, ""));
-  const headers = split(lines[0]).map(h => h.toLowerCase());
-  const find = (...names: string[]) => headers.findIndex(h => names.some(n => h.includes(n)));
-  const dateI = find("date"); const descI = find("description", "details", "narrative", "merchant");
-  const amountI = find("amount"); const debitI = find("debit", "withdrawal"); const creditI = find("credit", "deposit");
-  if (dateI < 0 || descI < 0 || (amountI < 0 && debitI < 0 && creditI < 0)) throw new Error("Couldn’t identify the date, description and amount columns");
-  return lines.slice(1).map((line, i) => {
-    const c = split(line); const clean = (v = "") => Number(v.replace(/[$,\s]/g, "")) || 0;
-    const amount = amountI >= 0 ? clean(c[amountI]) : clean(c[creditI]) - Math.abs(clean(c[debitI]));
-    return { id: `import-${Date.now()}-${i}`, date: c[dateI], description: c[descI] || "Transaction", amount, category: amount > 0 ? "Income" : guessCategory(c[descI]) };
-  }).filter(t => t.amount !== 0);
-}
-
-export default function Home() {
-  const [transactions, setTransactions] = useState<Tx[]>(demo);
-  const [query, setQuery] = useState("");
-  const [period, setPeriod] = useState("This month");
-  const [notice, setNotice] = useState("");
-  const file = useRef<HTMLInputElement>(null);
-  useEffect(() => { const saved = localStorage.getItem("pocketview-transactions"); if (saved) setTransactions(JSON.parse(saved)); }, []);
-  const totals = useMemo(() => {
-    const income = transactions.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0);
-    const spend = Math.abs(transactions.filter(t => t.amount < 0).reduce((a, t) => a + t.amount, 0));
-    return { income, spend, left: income - spend };
-  }, [transactions]);
-  const categorySpend = useMemo(() => Object.entries(budget).map(([name, limit]) => ({ name, limit, spent: Math.abs(transactions.filter(t => t.category === name && t.amount < 0).reduce((a, t) => a + t.amount, 0)) })).sort((a,b) => b.spent-a.spent), [transactions]);
-  const filtered = transactions.filter(t => `${t.description} ${t.category}`.toLowerCase().includes(query.toLowerCase()));
-  const importFile = async (f?: File) => {
-    if (!f) return;
-    try { const next = parseCsv(await f.text()); setTransactions(next); localStorage.setItem("pocketview-transactions", JSON.stringify(next)); setNotice(`${next.length} transactions imported securely on this device.`); }
-    catch (e) { setNotice(e instanceof Error ? e.message : "That file could not be read."); }
-  };
-
-  return <main className="shell">
-    <aside className="sidebar">
-      <div className="brand"><span className="brandmark">P</span><span>Pocketview</span></div>
-      <nav aria-label="Main navigation">
-        <button className="nav active"><span>⌂</span>Overview</button><button className="nav"><span>⇄</span>Transactions</button><button className="nav"><span>◎</span>Budgets</button><button className="nav"><span>◫</span>Accounts</button>
-      </nav>
-      <div className="sideBottom"><button className="nav"><span>?</span>Help & security</button><div className="profile"><div className="avatar">AM</div><div><b>Alex Morgan</b><small>Personal workspace</small></div><span>•••</span></div></div>
-    </aside>
-
-    <section className="content">
-      <header><div><p className="eyebrow">SATURDAY, 1 AUGUST</p><h1>Your money, made clear.</h1><p className="sub">Here’s how July came together.</p></div><div className="actions"><select value={period} onChange={e=>setPeriod(e.target.value)} aria-label="Budget period"><option>This month</option><option>Last month</option><option>Last 3 months</option></select><button className="import" onClick={()=>file.current?.click()}>＋ Import ANZ CSV</button><input ref={file} type="file" accept=".csv,text/csv" hidden onChange={e=>importFile(e.target.files?.[0])}/></div></header>
-      {notice && <div className="notice" role="status"><span>✓</span>{notice}<button onClick={()=>setNotice("")} aria-label="Dismiss">×</button></div>}
-
-      <section className="heroGrid">
-        <article className="balanceCard"><div className="cardTop"><span>Available after spending</span><span className="positive">↑ 12% vs June</span></div><div className="bigMoney">{money(totals.left)}</div><div className="bar"><i style={{width: `${Math.min(100, totals.income ? totals.spend/totals.income*100 : 0)}%`}}/></div><div className="balanceMeta"><div><small>INCOME</small><b>{money(totals.income)}</b></div><div><small>SPENT</small><b>{money(totals.spend)}</b></div><div><small>SAVINGS RATE</small><b>{totals.income ? Math.round(totals.left/totals.income*100) : 0}%</b></div></div></article>
-        <article className="insight"><div className="spark">✦</div><div><small>MONTHLY INSIGHT</small><h3>You’re building momentum.</h3><p>You spent {money(Math.max(0, 5120-totals.spend))} less than your recent average. Groceries and dining made the biggest difference.</p><button onClick={()=>setQuery("Dining")}>See the detail →</button></div></article>
-      </section>
-
-      <section className="sectionHead"><div><h2>Where your money went</h2><p>Spending against your monthly plan</p></div><button>View budgets →</button></section>
-      <section className="budgetGrid">
-        {categorySpend.slice(0,4).map(c => <article className="budgetCard" key={c.name}><div className="budgetTitle"><span className="catIcon" style={{background: colours[c.name]}}>{c.name[0]}</span><div><b>{c.name}</b><small>{Math.round(c.spent/c.limit*100)}% of budget</small></div><span className={c.spent>c.limit ? "over" : ""}>{money(c.spent)}</span></div><div className="miniBar"><i style={{width:`${Math.min(100,c.spent/c.limit*100)}%`,background:colours[c.name]}}/></div><div className="budgetFoot"><span>{money(Math.max(0,c.limit-c.spent))} left</span><span>of {money(c.limit)}</span></div></article>)}
-      </section>
-
-      <section className="transactions">
-        <div className="sectionHead"><div><h2>Recent transactions</h2><p>Your latest ANZ activity</p></div><label className="search">⌕<input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search transactions"/></label></div>
-        <div className="table" role="table"><div className="tr th" role="row"><span>DESCRIPTION</span><span>CATEGORY</span><span>DATE</span><span>AMOUNT</span></div>{filtered.slice(0,8).map(t=><div className="tr" role="row" key={t.id}><span className="merchant"><i>{t.description[0]}</i><b>{t.description}</b></span><span><em style={{background:`${colours[t.category] || "#8b96a8"}18`,color:colours[t.category] || "#657085"}}>{t.category}</em></span><span>{t.date}</span><span className={t.amount>0 ? "credit" : ""}>{t.amount>0?"+":""}{money(t.amount)}</span></div>)}</div>
-      </section>
-      <footer><span>Data shown here stays in this browser.</span><button onClick={()=>{setTransactions(demo);localStorage.removeItem("pocketview-transactions");setNotice("Demo data restored.")}}>Restore demo data</button></footer>
-    </section>
-  </main>;
-}
+import {useEffect,useMemo,useRef,useState} from "react";
+type Tx={id:string;date:string;amount:number;description:string;merchant:string;note:string;category:string;detail:string};
+type Rule={match:string;category:string;detail:string};
+const categories=["Food","Personal","Car","Streaming","Bills","Inbound TFR","Outbound TFR","Unclassified"];
+const budget:Record<string,number>={Food:1050,Personal:950,Car:700,Streaming:120,Bills:650};
+const colours:Record<string,string>={Food:"#22a06b",Personal:"#9b51e0",Car:"#2f80ed",Streaming:"#8390a5",Bills:"#e6566f","Inbound TFR":"#13a168","Outbound TFR":"#f08b3e",Unclassified:"#a2a9b5"};
+const money=(n:number)=>new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD",maximumFractionDigits:0}).format(n);
+function merchant(s:string){return s.replace(/^(VISA DEBIT PURCHASE CARD \d+|EFTPOS|ANZ INTERNET BANKING BPAY|ANZ MOBILE BANKING PAYMENT \d+ TO|PAYMENT (TO|FROM))\s*/i,"").replace(/\s+\{?\d{5,}\}?\s*$/g,"").replace(/\s{2,}.+$/,"").trim()||s}
+function classify(s:string,a:number){s=s.toLowerCase();if(a>0&&/salary|payroll|payment from/.test(s))return"Inbound TFR";if(a<0&&/payment (to|\d+ to)/.test(s))return"Outbound TFR";if(/woolworth|coles|aldi|\biga\b|milk bar|cafe|restaurant|lunch|breakfast|dinner/.test(s))return"Food";if(/petrol|vicroads|linkt|toll|parking|car wash|ampol|caltex/.test(s))return"Car";if(/agl|energy|telstra|optus|water|insurance/.test(s))return"Bills";if(/spotify|netflix|prime|youtube|disney|audible|crunchyroll|chatgpt|stan\b/.test(s))return"Streaming";if(/chemist|medical|pharmacy|bunnings|kmart|big w|school fees|st marys/.test(s))return"Personal";if(/account servicing fee/.test(s))return a>0?"Inbound TFR":"Outbound TFR";return"Unclassified"}
+function split(line:string){const out:string[]=[];let v="",q=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'&&line[i+1]==='"'){v+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){out.push(v.trim());v=""}else v+=c}out.push(v.trim());return out}
+function parseCsv(csv:string,rules:Rule[]):Tx[]{const lines=csv.replace(/^\uFEFF/,"").split(/\r?\n/).filter(Boolean);if(!lines.length)throw Error("No transactions found");const first=split(lines[0]);const headed=!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(first[0]);let date=0,amount=1,description=2,note=7,rows=lines;if(headed){const h=first.map(x=>x.toLowerCase());const find=(...n:string[])=>h.findIndex(x=>n.some(y=>x.includes(y)));date=find("date");amount=find("amount");description=find("description","details","narrative");note=find("note","memo");rows=lines.slice(1);if(date<0||amount<0||description<0)throw Error("Could not identify the date, description and amount columns")}return rows.map((line,i)=>{const c=split(line),raw=c[description]||"Transaction",a=Number((c[amount]||"").replace(/[$,\s]/g,"")),m=merchant(raw),n=note>=0?(c[note]||""):"",rule=rules.find(r=>raw.toLowerCase().includes(r.match));return{id:`anz-${Date.now()}-${i}`,date:c[date],amount:a,description:raw,merchant:m,note:n,category:rule?.category||classify(`${raw} ${n}`,a),detail:rule?.detail||n}}).filter(x=>Number.isFinite(x.amount)&&x.amount!==0)}
+const demo:Tx[]=[{id:"1",date:"31/07/2026",amount:-247,description:"PAYMENT TO ST MARYS COLLEGE SCHOOL FEES 40055",merchant:"ST MARYS COLLEGE SCHOOL FEES",note:"",category:"Personal",detail:"School Fees"},{id:"2",date:"30/07/2026",amount:-103.1,description:"VISA DEBIT PURCHASE CARD 6012 NDC SERVICE CO P/L SHEPPARTON",merchant:"NDC SERVICE CO P/L",note:"",category:"Unclassified",detail:""},{id:"3",date:"28/07/2026",amount:-28,description:"VISA DEBIT PURCHASE CARD 6012 POPLAR AVENUE MILK BAR SHEPPARTON",merchant:"POPLAR AVENUE MILK BAR",note:"",category:"Food",detail:"Takeout"},{id:"4",date:"25/07/2026",amount:6240,description:"SALARY PAYMENT",merchant:"SALARY PAYMENT",note:"",category:"Inbound TFR",detail:"Salary"}];
+export default function Home(){const[view,setView]=useState<"overview"|"transactions">("overview"),[txs,setTxs]=useState<Tx[]>(demo),[rules,setRules]=useState<Rule[]>([]),[query,setQuery]=useState(""),[notice,setNotice]=useState("");const file=useRef<HTMLInputElement>(null);useEffect(()=>{try{const t=localStorage.getItem("pocketview-v2"),r=localStorage.getItem("pocketview-rules");if(t)setTxs(JSON.parse(t));if(r)setRules(JSON.parse(r))}catch{}},[]);const save=(x:Tx[])=>{setTxs(x);localStorage.setItem("pocketview-v2",JSON.stringify(x))};const totals=useMemo(()=>{const income=txs.filter(x=>x.amount>0).reduce((a,x)=>a+x.amount,0),spent=Math.abs(txs.filter(x=>x.amount<0&&!x.category.includes("TFR")).reduce((a,x)=>a+x.amount,0));return{income,spent,left:income-spent}},[txs]);const spend=Object.entries(budget).map(([name,limit])=>({name,limit,spent:Math.abs(txs.filter(x=>x.category===name&&x.amount<0).reduce((a,x)=>a+x.amount,0))}));const shown=txs.filter(x=>`${x.merchant} ${x.description} ${x.note}`.toLowerCase().includes(query.toLowerCase()));const upload=async(f?:File)=>{if(!f)return;try{const x=parseCsv(await f.text(),rules);save(x);setNotice(`${x.length} transactions imported · ${x.filter(t=>t.category==="Unclassified").length} need review.`);setView("transactions")}catch(e){setNotice(e instanceof Error?e.message:"Could not read that file")}};const update=(id:string,p:Partial<Tx>)=>save(txs.map(x=>x.id===id?{...x,...p}:x));return <main className="shell"><aside className="sidebar"><div className="brand"><span className="brandmark">P</span><span>Pocketview</span></div><nav><button className={`nav ${view==="overview"?"active":""}`} onClick={()=>setView("overview")}><span>⌂</span>Overview</button><button className={`nav ${view==="transactions"?"active":""}`} onClick={()=>setView("transactions")}><span>⇄</span>Classify transactions <b className="badge">{txs.filter(x=>x.category==="Unclassified").length}</b></button></nav><div className="sideBottom"><button className="nav"><span>?</span>Help & security</button><div className="profile"><div className="avatar">JB</div><div><b>Personal budget</b><small>Stored on this device</small></div></div></div></aside><section className="content">{notice&&<div className="notice"><span>✓</span>{notice}<button onClick={()=>setNotice("")}>×</button></div>}{view==="overview"?<><header><div><p className="eyebrow">YOUR FINANCIAL PICTURE</p><h1>Your money, made clear.</h1><p className="sub">Built around your ANZ transaction history.</p></div><div className="actions"><button className="import" onClick={()=>file.current?.click()}>＋ Import ANZ CSV</button><input ref={file} hidden type="file" accept=".csv" onChange={e=>upload(e.target.files?.[0])}/></div></header><section className="heroGrid"><article className="balanceCard"><div className="cardTop"><span>Available after spending</span><span className="positive">Device-private</span></div><div className="bigMoney">{money(totals.left)}</div><div className="bar"><i style={{width:`${Math.min(100,totals.income?totals.spent/totals.income*100:0)}%`}}/></div><div className="balanceMeta"><div><small>INCOME</small><b>{money(totals.income)}</b></div><div><small>SPENT</small><b>{money(totals.spent)}</b></div><div><small>SAVINGS RATE</small><b>{totals.income?Math.round(totals.left/totals.income*100):0}%</b></div></div></article><article className="insight"><div className="spark">✦</div><div><small>CLASSIFICATION HEALTH</small><h3>{txs.filter(x=>x.category==="Unclassified").length} transactions need review.</h3><p>Correct a merchant once and Pocketview will remember it for future imports.</p><button onClick={()=>setView("transactions")}>Review transactions →</button></div></article></section><section className="sectionHead"><div><h2>Where your money went</h2><p>Using the category structure from your budget workbook</p></div></section><section className="budgetGrid">{spend.map(x=><article className="budgetCard" key={x.name}><div className="budgetTitle"><span className="catIcon" style={{background:colours[x.name]}}>{x.name[0]}</span><div><b>{x.name}</b><small>{Math.round(x.spent/x.limit*100)}% of guide</small></div><span>{money(x.spent)}</span></div><div className="miniBar"><i style={{width:`${Math.min(100,x.spent/x.limit*100)}%`,background:colours[x.name]}}/></div><div className="budgetFoot"><span>{money(Math.max(0,x.limit-x.spent))} left</span><span>of {money(x.limit)}</span></div></article>)}</section></>:<><header><div><p className="eyebrow">TRANSACTION WORKBENCH</p><h1>Make every transaction meaningful.</h1><p className="sub">Clean merchants, add context, and teach Pocketview your categories.</p></div><div className="actions"><button className="import" onClick={()=>file.current?.click()}>＋ Import ANZ CSV</button><input ref={file} hidden type="file" accept=".csv" onChange={e=>upload(e.target.files?.[0])}/></div></header><section className="reviewStats"><article><small>TRANSACTIONS</small><b>{txs.length}</b></article><article><small>NEEDS REVIEW</small><b>{txs.filter(x=>x.category==="Unclassified").length}</b></article><article><small>LEARNED RULES</small><b>{rules.length}</b></article></section><section className="workbench"><div className="toolbar"><label className="search">⌕<input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search merchant or note"/></label></div>{shown.map(t=><article className={`classRow ${t.category==="Unclassified"?"needsReview":""}`} key={t.id}><div className="txMain"><i>{t.merchant[0]}</i><div><b>{t.merchant}</b><small>{t.date} · {t.description}</small>{t.note&&<p>ANZ note: {t.note}</p>}</div><strong className={t.amount>0?"credit":""}>{t.amount>0?"+":""}{money(t.amount)}</strong></div><div className="classControls"><label>CATEGORY<select value={t.category} onChange={e=>update(t.id,{category:e.target.value})}>{categories.map(x=><option key={x}>{x}</option>)}</select></label><label>WHAT IT MEANS<input value={t.detail} placeholder="e.g. School fees" onChange={e=>update(t.id,{detail:e.target.value})}/></label><button className="remember" onClick={()=>{const rule={match:t.merchant.toLowerCase(),category:t.category,detail:t.detail},next=[...rules.filter(r=>r.match!==rule.match),rule];setRules(next);localStorage.setItem("pocketview-rules",JSON.stringify(next));setNotice(`Rule saved for ${t.merchant}.`)}}>Remember merchant</button></div></article>)}</section></>}<footer><span>Transactions and rules stay in this browser.</span><button onClick={()=>save(demo)}>Restore demo data</button></footer></section></main>}
