@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./features.css";
 
 export const metadata: Metadata = {
   title: "Pocketview — Your money, made clear",

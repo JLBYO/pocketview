@@ -31,15 +31,24 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /workbenchPageSize = 50/);
   assert.match(page, /Export JSON/);
   assert.match(page, /Export CSV/);
+  assert.match(page, /matchTransfers/);
+  assert.match(page, /recurringPayments/);
+  assert.match(page, /30-DAY SPEND FORECAST/);
+  assert.match(page, /Undo latest change/);
+  assert.match(page, /Export encrypted backup/);
 });
 
 test("includes the shared pastel interface system", async () => {
-  const [css, layout] = await Promise.all([
+  const [css, features, layout] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/features.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(css, /--lavender:#f0eeff/);
   assert.match(css, /\.actions button,.actions \.import/);
   assert.match(css, /button:focus-visible/);
+  assert.match(features, /\.overviewActions>button\{width:184px;min-width:184px/);
+  assert.match(features, /\.inboundBar\{background:linear-gradient\(180deg,#a99eee,#7469d7\)/);
+  assert.match(features, /\.outboundBar\{background:linear-gradient\(180deg,#bce8d5,#83c9aa\)/);
   assert.match(layout, /Pocketview/);
 });
