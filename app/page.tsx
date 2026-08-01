@@ -12,6 +12,7 @@ type Tx = {
 };
 type Rule = {
     match: string;
+    merchant: string;
     category: string;
     detail: string;
 };
@@ -19,6 +20,9 @@ const categories = ["Food", "Personal", "Car", "Streaming", "Bills", "Inbound TF
 const budget: Record<string, number> = { Food: 1050, Personal: 950, Car: 700, Streaming: 120, Bills: 650 };
 const colours: Record<string, string> = { Food: "#22a06b", Personal: "#9b51e0", Car: "#2f80ed", Streaming: "#8390a5", Bills: "#e6566f", "Inbound TFR": "#13a168", "Outbound TFR": "#f08b3e", Unclassified: "#a2a9b5" };
 const money = (n: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
+const reviewNeeded = (t: Tx) => !t.merchant.trim() || t.category === "Unclassified" || !t.detail.trim();
+const dateKey = (value: string) => { const p = value.split(/[\/-]/).map(Number); return p[0] > 1900 ? p[0] * 10000 + p[1] * 100 + p[2] : p[2] * 10000 + p[1] * 100 + p[0]; };
+const ruleMatches = (t: Tx, r: Rule) => { const source = `${t.merchant} ${t.description}`.toLowerCase(); return source.includes(r.match) || r.match.includes(t.merchant.toLowerCase()); };
 function merchant(s: string) { return s.replace(/^(VISA DEBIT PURCHASE CARD \d+|EFTPOS|ANZ INTERNET BANKING BPAY|ANZ MOBILE BANKING PAYMENT \d+ TO|PAYMENT (TO|FROM))\s*/i, "").replace(/\s+\{?\d{5,}\}?\s*$/g, "").replace(/\s{2,}.+$/, "").trim() || s; }
 function classify(s: string, a: number) { s = s.toLowerCase(); if (a > 0 && /salary|payroll|payment from/.test(s))
     return "Inbound TFR"; if (a < 0 && /payment (to|\d+ to)/.test(s))
@@ -55,9 +59,9 @@ function parseCsv(csv: string, rules: Rule[]): Tx[] { const lines = csv.replace(
     rows = lines.slice(1);
     if (date < 0 || amount < 0 || description < 0)
         throw Error("Could not identify the date, description and amount columns");
-} return rows.map((line, i) => { const c = split(line), raw = c[description] || "Transaction", a = Number((c[amount] || "").replace(/[$,\s]/g, "")), m = merchant(raw), n = note >= 0 ? (c[note] || "") : "", rule = rules.find(r => raw.toLowerCase().includes(r.match)); return { id: `anz-${Date.now()}-${i}`, date: c[date], amount: a, description: raw, merchant: m, note: n, category: rule?.category || classify(`${raw} ${n}`, a), detail: rule?.detail || n }; }).filter(x => Number.isFinite(x.amount) && x.amount !== 0); }
+} return rows.map((line, i) => { const c = split(line), raw = c[description] || "Transaction", a = Number((c[amount] || "").replace(/[$,\s]/g, "")), m = merchant(raw), n = note >= 0 ? (c[note] || "") : "", base = { id: `anz-${Date.now()}-${i}`, date: c[date], amount: a, description: raw, merchant: m, note: n, category: classify(`${raw} ${n}`, a), detail: n }, rule = rules.find(r => ruleMatches(base, r)); return { ...base, merchant: rule?.merchant || m, category: rule?.category || base.category, detail: rule?.detail || n }; }).filter(x => Number.isFinite(x.amount) && x.amount !== 0); }
 const demo: Tx[] = [{ id: "1", date: "31/07/2026", amount: -247, description: "PAYMENT TO ST MARYS COLLEGE SCHOOL FEES 40055", merchant: "ST MARYS COLLEGE SCHOOL FEES", note: "", category: "Personal", detail: "School Fees" }, { id: "2", date: "30/07/2026", amount: -103.1, description: "VISA DEBIT PURCHASE CARD 6012 NDC SERVICE CO P/L SHEPPARTON", merchant: "NDC SERVICE CO P/L", note: "", category: "Unclassified", detail: "" }, { id: "3", date: "28/07/2026", amount: -28, description: "VISA DEBIT PURCHASE CARD 6012 POPLAR AVENUE MILK BAR SHEPPARTON", merchant: "POPLAR AVENUE MILK BAR", note: "", category: "Food", detail: "Takeout" }, { id: "4", date: "25/07/2026", amount: 6240, description: "SALARY PAYMENT", merchant: "SALARY PAYMENT", note: "", category: "Inbound TFR", detail: "Salary" }];
-export default function Home() { const [view, setView] = useState<"overview" | "transactions" | "category">("overview"), [txs, setTxs] = useState<Tx[]>(demo), [rules, setRules] = useState<Rule[]>([]), [customCategories, setCustomCategories] = useState<string[]>([]), [newCategory, setNewCategory] = useState(""), [selectedCategory, setSelectedCategory] = useState("Food"), [reviewOnly, setReviewOnly] = useState(false), [query, setQuery] = useState(""), [notice, setNotice] = useState(""); const file = useRef<HTMLInputElement>(null); useEffect(() => { try {
+export default function Home() { const [view, setView] = useState<"overview" | "transactions" | "category">("overview"), [txs, setTxs] = useState<Tx[]>(demo), [rules, setRules] = useState<Rule[]>([]), [customCategories, setCustomCategories] = useState<string[]>([]), [newCategory, setNewCategory] = useState(""), [selectedCategory, setSelectedCategory] = useState("Food"), [reviewOnly, setReviewOnly] = useState(false), [query, setQuery] = useState(""), [fromDate, setFromDate] = useState(""), [toDate, setToDate] = useState(""), [categorySlice, setCategorySlice] = useState("All"), [detailSlice, setDetailSlice] = useState("All"), [merchantSlice, setMerchantSlice] = useState("All"), [notice, setNotice] = useState(""); const file = useRef<HTMLInputElement>(null); useEffect(() => { try {
     const t = localStorage.getItem("pocketview-v2"), r = localStorage.getItem("pocketview-rules"), c = localStorage.getItem("pocketview-categories");
     if (t)
         setTxs(JSON.parse(t));
@@ -66,7 +70,7 @@ export default function Home() { const [view, setView] = useState<"overview" | "
     if (c)
         setCustomCategories(JSON.parse(c));
 }
-catch { } }, []); const save = (x: Tx[]) => { setTxs(x); localStorage.setItem("pocketview-v2", JSON.stringify(x)); }; const allCategories = [...categories, ...customCategories]; const totals = useMemo(() => { const income = txs.filter(x => x.amount > 0).reduce((a, x) => a + x.amount, 0), spent = Math.abs(txs.filter(x => x.amount < 0 && !x.category.includes("TFR")).reduce((a, x) => a + x.amount, 0)); return { income, spent, left: income - spent }; }, [txs]); const spend = allCategories.filter(name => !name.includes("TFR") && name !== "Unclassified").map(name => ({ name, limit: budget[name] || 0, spent: Math.abs(txs.filter(x => x.category === name && x.amount < 0).reduce((a, x) => a + x.amount, 0)) })).filter(x => x.spent > 0 || x.limit > 0); const shown = txs.filter(x => (!reviewOnly || x.category === "Unclassified") && `${x.merchant} ${x.description} ${x.note}`.toLowerCase().includes(query.toLowerCase())); const addCategory = () => { const name = newCategory.trim(); if (!name || allCategories.some(x => x.toLowerCase() === name.toLowerCase())) return; const next = [...customCategories, name]; setCustomCategories(next); localStorage.setItem("pocketview-categories", JSON.stringify(next)); setNewCategory(""); setNotice(`Category “${name}” added.`); }; const applyLearnings = () => { const next = txs.map(t => { const rule = rules.find(r => `${t.merchant} ${t.description}`.toLowerCase().includes(r.match)); return rule ? { ...t, category: rule.category, detail: rule.detail } : t; }); save(next); setReviewOnly(true); setNotice(`Applied ${rules.length} learned merchant rules. Only transactions needing review are shown.`); }; const upload = async (f?: File) => { if (!f)
+catch { } }, []); const save = (x: Tx[]) => { setTxs(x); localStorage.setItem("pocketview-v2", JSON.stringify(x)); }; const allCategories = [...categories, ...customCategories]; const filteredTxs = txs.filter(t => (!fromDate || dateKey(t.date) >= dateKey(fromDate)) && (!toDate || dateKey(t.date) <= dateKey(toDate)) && (categorySlice === "All" || t.category === categorySlice) && (detailSlice === "All" || t.detail === detailSlice) && (merchantSlice === "All" || t.merchant === merchantSlice)); const detailOptions = [...new Set(txs.map(t => t.detail).filter(Boolean))].sort(); const merchantOptions = [...new Set(txs.map(t => t.merchant).filter(Boolean))].sort(); const totals = useMemo(() => { const income = filteredTxs.filter(x => x.amount > 0).reduce((a, x) => a + x.amount, 0), spent = Math.abs(filteredTxs.filter(x => x.amount < 0 && !x.category.includes("TFR")).reduce((a, x) => a + x.amount, 0)); return { income, spent, left: income - spent }; }, [filteredTxs]); const spend = allCategories.filter(name => !name.includes("TFR") && name !== "Unclassified").map(name => ({ name, limit: budget[name] || 0, spent: Math.abs(filteredTxs.filter(x => x.category === name && x.amount < 0).reduce((a, x) => a + x.amount, 0)) })).filter(x => x.spent > 0 || x.limit > 0); const shown = txs.filter(x => (!reviewOnly || reviewNeeded(x)) && `${x.merchant} ${x.description} ${x.note}`.toLowerCase().includes(query.toLowerCase())); const addCategory = () => { const name = newCategory.trim(); if (!name || allCategories.some(x => x.toLowerCase() === name.toLowerCase())) return; const next = [...customCategories, name]; setCustomCategories(next); localStorage.setItem("pocketview-categories", JSON.stringify(next)); setNewCategory(""); setNotice(`Category “${name}” added.`); }; const applyLearnings = () => { const latest = JSON.parse(localStorage.getItem("pocketview-rules") || "[]") as Rule[]; const activeRules = latest.length ? latest : rules; const next = txs.map(t => { const rule = activeRules.find(r => ruleMatches(t, r)); return rule ? { ...t, merchant: rule.merchant || t.merchant, category: rule.category, detail: rule.detail } : t; }); save(next); setRules(activeRules); setReviewOnly(true); const remaining = next.filter(reviewNeeded).length; setNotice(`Applied ${activeRules.length} learned rules. ${remaining} transactions still need review.`); }; const exportCsv = () => { const quote = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`; const rows = [["Date", "Amount", "Merchant", "Category", "Category Detail", "Bank Description", "ANZ Note", "Review Status"], ...filteredTxs.map(t => [t.date, t.amount, t.merchant, t.category, t.detail, t.description, t.note, reviewNeeded(t) ? "Needs review" : "Complete"])]; const blob = new Blob([rows.map(row => row.map(quote).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }); const url = URL.createObjectURL(blob), a = document.createElement("a"); a.href = url; a.download = `pocketview-enriched-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url); setNotice(`Exported ${filteredTxs.length} enriched transactions.`); }; const upload = async (f?: File) => { if (!f)
     return; try {
     const x = parseCsv(await f.text(), rules);
     save(x);
@@ -86,7 +90,7 @@ catch (e) {
 <span>⌂</span>Overview</button>
 <button className={`nav ${view === "transactions" ? "active" : ""}`} onClick={() => setView("transactions")}>
 <span>⇄</span>Classify transactions <b className="badge">
-{txs.filter(x => x.category === "Unclassified").length}</b>
+{txs.filter(reviewNeeded).length}</b>
 </button>
 </nav>
 <div className="sideBottom">
@@ -113,10 +117,12 @@ catch (e) {
 <p className="sub">Built around your ANZ transaction history.</p>
 </div>
 <div className="actions">
+<button className="backButton" onClick={exportCsv}>⇩ Export enriched CSV</button>
 <button className="import" onClick={() => file.current?.click()}>＋ Import ANZ CSV</button>
 <input ref={file} hidden type="file" accept=".csv" onChange={e => upload(e.target.files?.[0])}/>
 </div>
 </header>
+<section className="slicerPanel"><label>FROM<input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}/></label><label>TO<input type="date" value={toDate} onChange={e => setToDate(e.target.value)}/></label><label>CATEGORY<select value={categorySlice} onChange={e => setCategorySlice(e.target.value)}><option>All</option>{allCategories.map(x => <option key={x}>{x}</option>)}</select></label><label>CATEGORY DETAIL<select value={detailSlice} onChange={e => setDetailSlice(e.target.value)}><option>All</option>{detailOptions.map(x => <option key={x}>{x}</option>)}</select></label><label>MERCHANT<select value={merchantSlice} onChange={e => setMerchantSlice(e.target.value)}><option>All</option>{merchantOptions.map(x => <option key={x}>{x}</option>)}</select></label><button onClick={() => { setFromDate(""); setToDate(""); setCategorySlice("All"); setDetailSlice("All"); setMerchantSlice("All"); }}>Clear</button></section>
 <section className="heroGrid">
 <article className="balanceCard">
 <div className="cardTop">
@@ -151,7 +157,7 @@ catch (e) {
 <div>
 <small>CLASSIFICATION HEALTH</small>
 <h3>
-{txs.filter(x => x.category === "Unclassified").length} transactions need review.</h3>
+{txs.filter(reviewNeeded).length} transactions need review.</h3>
 <p>Correct a merchant once and Pocketview will remember it for future imports.</p>
 <button onClick={() => setView("transactions")}>Review transactions →</button>
 </div>
@@ -165,7 +171,7 @@ catch (e) {
 </section>
 <section className="budgetGrid">
 {spend.map(x =>
-<article className="budgetCard clickable" tabIndex={0} role="button" key={x.name} onClick={() => { setSelectedCategory(x.name); setView("category"); }} onKeyDown={e => { if (e.key === "Enter") { setSelectedCategory(x.name); setView("category"); } }}>
+<article className="budgetCard clickable" tabIndex={0} role="button" key={x.name} onClick={() => { setSelectedCategory(x.name); setCategorySlice(x.name); setView("category"); }} onKeyDown={e => { if (e.key === "Enter") { setSelectedCategory(x.name); setCategorySlice(x.name); setView("category"); } }}>
 <div className="budgetTitle">
 <span className="catIcon" style={{ background: colours[x.name] || "#625bf6" }}>
 {x.name[0]}</span>
@@ -188,9 +194,10 @@ catch (e) {
 </div>
 </article>)}</section>
 </> : view === "category" ? <>
-<header><div><p className="eyebrow">CATEGORY DETAIL</p><h1>{selectedCategory}</h1><p className="sub">Every transaction currently classified in this category.</p></div><div className="actions"><button className="backButton" onClick={() => setView("overview")}>← Back to overview</button></div></header>
-<section className="categorySummary"><span>Total spent</span><b>{money(Math.abs(txs.filter(t => t.category === selectedCategory && t.amount < 0).reduce((a, t) => a + t.amount, 0)))}</b><small>{txs.filter(t => t.category === selectedCategory).length} transactions</small></section>
-<section className="transactions categoryTransactions"><div className="table"><div className="tr th"><span>MERCHANT</span><span>WHAT IT MEANS</span><span>DATE</span><span>AMOUNT</span></div>{txs.filter(t => t.category === selectedCategory).map(t => <div className="tr" key={t.id}><span className="merchant"><i>{t.merchant[0]}</i><b>{t.merchant}</b></span><span>{t.detail || "—"}</span><span>{t.date}</span><span className={t.amount > 0 ? "credit" : ""}>{t.amount > 0 ? "+" : ""}{money(t.amount)}</span></div>)}</div></section>
+<header><div><p className="eyebrow">DEEP DIVE</p><h1>{selectedCategory}</h1><p className="sub">Edit enriched taxonomy fields or export this filtered view.</p></div><div className="actions"><button className="backButton" onClick={exportCsv}>⇩ Export this view</button><button className="backButton" onClick={() => setView("overview")}>← Back to overview</button></div></header>
+<section className="slicerPanel"><label>FROM<input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}/></label><label>TO<input type="date" value={toDate} onChange={e => setToDate(e.target.value)}/></label><label>CATEGORY DETAIL<select value={detailSlice} onChange={e => setDetailSlice(e.target.value)}><option>All</option>{detailOptions.map(x => <option key={x}>{x}</option>)}</select></label><label>MERCHANT<select value={merchantSlice} onChange={e => setMerchantSlice(e.target.value)}><option>All</option>{merchantOptions.map(x => <option key={x}>{x}</option>)}</select></label></section>
+<section className="categorySummary"><span>Total spent</span><b>{money(Math.abs(filteredTxs.filter(t => t.amount < 0).reduce((a, t) => a + t.amount, 0)))}</b><small>{filteredTxs.length} transactions</small></section>
+<section className="transactions categoryTransactions"><div className="drillTable"><div className="drillRow drillHead"><span>MERCHANT</span><span>CATEGORY</span><span>CATEGORY DETAIL</span><span>DATE</span><span>AMOUNT</span></div>{filteredTxs.map(t => <div className="drillRow" key={t.id}><input value={t.merchant} onChange={e => update(t.id, { merchant: e.target.value })}/><select value={t.category} onChange={e => update(t.id, { category: e.target.value })}>{allCategories.map(x => <option key={x}>{x}</option>)}</select><input value={t.detail} onChange={e => update(t.id, { detail: e.target.value })} placeholder="Add detail"/><span>{t.date}</span><strong className={t.amount > 0 ? "credit" : ""}>{t.amount > 0 ? "+" : ""}{money(t.amount)}</strong></div>)}</div></section>
 </> : <>
 <header>
 <div>
@@ -212,7 +219,7 @@ catch (e) {
 <article>
 <small>NEEDS REVIEW</small>
 <b>
-{txs.filter(x => x.category === "Unclassified").length}</b>
+{txs.filter(reviewNeeded).length}</b>
 </article>
 <article>
 <small>LEARNED RULES</small>
@@ -229,7 +236,7 @@ catch (e) {
 </div>
 <div className="categoryMaker"><div><b>Add a category</b><small>Create a category, then assign transactions to it below.</small></div><input value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addCategory(); }} placeholder="e.g. Holidays"/><button onClick={addCategory}>Add category</button></div>
 {shown.map(t =>
-<article className={`classRow ${t.category === "Unclassified" ? "needsReview" : ""}`} key={t.id}>
+<article className={`classRow ${reviewNeeded(t) ? "needsReview" : ""}`} key={t.id}>
 <div className="txMain">
 <i>
 {t.merchant[0]}</i>
@@ -243,14 +250,16 @@ catch (e) {
 {t.amount > 0 ? "+" : ""}{money(t.amount)}</strong>
 </div>
 <div className="classControls">
+<label>MERCHANT<input value={t.merchant} onChange={e => update(t.id, { merchant: e.target.value })} placeholder="Clean merchant name"/>
+</label>
 <label>CATEGORY<select value={t.category} onChange={e => update(t.id, { category: e.target.value })}>
 {allCategories.map(x =>
 <option key={x}>
 {x}</option>)}</select>
 </label>
-<label>WHAT IT MEANS<input value={t.detail} placeholder="e.g. School fees" onChange={e => update(t.id, { detail: e.target.value })}/>
+<label>CATEGORY DETAIL<input value={t.detail} placeholder="e.g. School fees" onChange={e => update(t.id, { detail: e.target.value })}/>
 </label>
-<button className="remember" onClick={() => { const rule = { match: t.merchant.toLowerCase(), category: t.category, detail: t.detail }, next = [...rules.filter(r => r.match !== rule.match), rule]; setRules(next); localStorage.setItem("pocketview-rules", JSON.stringify(next)); setNotice(`Rule saved for ${t.merchant}. Click “Apply learned rules” to update the list.`); }}>Remember merchant</button>
+<button className="remember" onClick={() => { const rule = { match: t.merchant.toLowerCase(), merchant: t.merchant, category: t.category, detail: t.detail }, nextRules = [...rules.filter(r => r.match !== rule.match), rule], nextTxs = txs.map(x => ruleMatches(x, rule) ? { ...x, merchant: rule.merchant, category: rule.category, detail: rule.detail } : x); setRules(nextRules); localStorage.setItem("pocketview-rules", JSON.stringify(nextRules)); save(nextTxs); setNotice(`Rule saved and applied to matching ${t.merchant} transactions.`); }}>Remember & apply</button>
 </div>
 </article>)}</section>
 </>}<footer>
