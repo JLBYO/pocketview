@@ -26,7 +26,7 @@ test("keeps transaction classification user-driven", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(page, /function classify\(\) \{ return "Unclassified"; \}/);
   assert.doesNotMatch(page, /if\s*\([^)]*(?:ANZ|BIG\s*W)/i);
-  assert.match(page, /Type or choose detail/);
+  assert.match(page, /Type Or Choose Detail/);
   assert.match(page, /deepDivePageSize = 25/);
   assert.match(page, /workbenchPageSize = 50/);
   assert.match(page, /Export JSON/);
@@ -34,8 +34,14 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /matchTransfers/);
   assert.match(page, /recurringPayments/);
   assert.match(page, /30-DAY SPEND FORECAST/);
-  assert.match(page, /Undo latest change/);
-  assert.match(page, /Export encrypted backup/);
+  assert.match(page, /Undo Latest Change/);
+  assert.match(page, /Export Encrypted Backup/);
+  assert.match(page, /multiple type="file"/);
+  assert.match(page, /Confirm Each Bank And Account/);
+  assert.match(page, /duplicateKey/);
+  assert.match(page, /View \$\{matchingTransactions.length\} Matches/);
+  assert.match(page, /Manage Imported Accounts/);
+  assert.match(page, /Bank", "Account Name", "Source File/);
 });
 
 test("includes the shared pastel interface system", async () => {
@@ -50,5 +56,8 @@ test("includes the shared pastel interface system", async () => {
   assert.match(features, /\.overviewActions>button\{width:184px;min-width:184px/);
   assert.match(features, /\.inboundBar\{background:linear-gradient\(180deg,#a99eee,#7469d7\)/);
   assert.match(features, /\.outboundBar\{background:linear-gradient\(180deg,#bce8d5,#83c9aa\)/);
+  assert.match(features, /\.importModalBackdrop/);
+  assert.match(features, /\.ruleMatchPanel/);
+  assert.match(features, /\.accountManagement/);
   assert.match(layout, /Pocketview/);
 });
