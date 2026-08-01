@@ -1,14 +1,261 @@
 "use client";
-import {useEffect,useMemo,useRef,useState} from "react";
-type Tx={id:string;date:string;amount:number;description:string;merchant:string;note:string;category:string;detail:string};
-type Rule={match:string;category:string;detail:string};
-const categories=["Food","Personal","Car","Streaming","Bills","Inbound TFR","Outbound TFR","Unclassified"];
-const budget:Record<string,number>={Food:1050,Personal:950,Car:700,Streaming:120,Bills:650};
-const colours:Record<string,string>={Food:"#22a06b",Personal:"#9b51e0",Car:"#2f80ed",Streaming:"#8390a5",Bills:"#e6566f","Inbound TFR":"#13a168","Outbound TFR":"#f08b3e",Unclassified:"#a2a9b5"};
-const money=(n:number)=>new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD",maximumFractionDigits:0}).format(n);
-function merchant(s:string){return s.replace(/^(VISA DEBIT PURCHASE CARD \d+|EFTPOS|ANZ INTERNET BANKING BPAY|ANZ MOBILE BANKING PAYMENT \d+ TO|PAYMENT (TO|FROM))\s*/i,"").replace(/\s+\{?\d{5,}\}?\s*$/g,"").replace(/\s{2,}.+$/,"").trim()||s}
-function classify(s:string,a:number){s=s.toLowerCase();if(a>0&&/salary|payroll|payment from/.test(s))return"Inbound TFR";if(a<0&&/payment (to|\d+ to)/.test(s))return"Outbound TFR";if(/woolworth|coles|aldi|\biga\b|milk bar|cafe|restaurant|lunch|breakfast|dinner/.test(s))return"Food";if(/petrol|vicroads|linkt|toll|parking|car wash|ampol|caltex/.test(s))return"Car";if(/agl|energy|telstra|optus|water|insurance/.test(s))return"Bills";if(/spotify|netflix|prime|youtube|disney|audible|crunchyroll|chatgpt|stan\b/.test(s))return"Streaming";if(/chemist|medical|pharmacy|bunnings|kmart|big w|school fees|st marys/.test(s))return"Personal";if(/account servicing fee/.test(s))return a>0?"Inbound TFR":"Outbound TFR";return"Unclassified"}
-function split(line:string){const out:string[]=[];let v="",q=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'&&line[i+1]==='"'){v+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){out.push(v.trim());v=""}else v+=c}out.push(v.trim());return out}
-function parseCsv(csv:string,rules:Rule[]):Tx[]{const lines=csv.replace(/^\uFEFF/,"").split(/\r?\n/).filter(Boolean);if(!lines.length)throw Error("No transactions found");const first=split(lines[0]);const headed=!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(first[0]);let date=0,amount=1,description=2,note=7,rows=lines;if(headed){const h=first.map(x=>x.toLowerCase());const find=(...n:string[])=>h.findIndex(x=>n.some(y=>x.includes(y)));date=find("date");amount=find("amount");description=find("description","details","narrative");note=find("note","memo");rows=lines.slice(1);if(date<0||amount<0||description<0)throw Error("Could not identify the date, description and amount columns")}return rows.map((line,i)=>{const c=split(line),raw=c[description]||"Transaction",a=Number((c[amount]||"").replace(/[$,\s]/g,"")),m=merchant(raw),n=note>=0?(c[note]||""):"",rule=rules.find(r=>raw.toLowerCase().includes(r.match));return{id:`anz-${Date.now()}-${i}`,date:c[date],amount:a,description:raw,merchant:m,note:n,category:rule?.category||classify(`${raw} ${n}`,a),detail:rule?.detail||n}}).filter(x=>Number.isFinite(x.amount)&&x.amount!==0)}
-const demo:Tx[]=[{id:"1",date:"31/07/2026",amount:-247,description:"PAYMENT TO ST MARYS COLLEGE SCHOOL FEES 40055",merchant:"ST MARYS COLLEGE SCHOOL FEES",note:"",category:"Personal",detail:"School Fees"},{id:"2",date:"30/07/2026",amount:-103.1,description:"VISA DEBIT PURCHASE CARD 6012 NDC SERVICE CO P/L SHEPPARTON",merchant:"NDC SERVICE CO P/L",note:"",category:"Unclassified",detail:""},{id:"3",date:"28/07/2026",amount:-28,description:"VISA DEBIT PURCHASE CARD 6012 POPLAR AVENUE MILK BAR SHEPPARTON",merchant:"POPLAR AVENUE MILK BAR",note:"",category:"Food",detail:"Takeout"},{id:"4",date:"25/07/2026",amount:6240,description:"SALARY PAYMENT",merchant:"SALARY PAYMENT",note:"",category:"Inbound TFR",detail:"Salary"}];
-export default function Home(){const[view,setView]=useState<"overview"|"transactions">("overview"),[txs,setTxs]=useState<Tx[]>(demo),[rules,setRules]=useState<Rule[]>([]),[query,setQuery]=useState(""),[notice,setNotice]=useState("");const file=useRef<HTMLInputElement>(null);useEffect(()=>{try{const t=localStorage.getItem("pocketview-v2"),r=localStorage.getItem("pocketview-rules");if(t)setTxs(JSON.parse(t));if(r)setRules(JSON.parse(r))}catch{}},[]);const save=(x:Tx[])=>{setTxs(x);localStorage.setItem("pocketview-v2",JSON.stringify(x))};const totals=useMemo(()=>{const income=txs.filter(x=>x.amount>0).reduce((a,x)=>a+x.amount,0),spent=Math.abs(txs.filter(x=>x.amount<0&&!x.category.includes("TFR")).reduce((a,x)=>a+x.amount,0));return{income,spent,left:income-spent}},[txs]);const spend=Object.entries(budget).map(([name,limit])=>({name,limit,spent:Math.abs(txs.filter(x=>x.category===name&&x.amount<0).reduce((a,x)=>a+x.amount,0))}));const shown=txs.filter(x=>`${x.merchant} ${x.description} ${x.note}`.toLowerCase().includes(query.toLowerCase()));const upload=async(f?:File)=>{if(!f)return;try{const x=parseCsv(await f.text(),rules);save(x);setNotice(`${x.length} transactions imported · ${x.filter(t=>t.category==="Unclassified").length} need review.`);setView("transactions")}catch(e){setNotice(e instanceof Error?e.message:"Could not read that file")}};const update=(id:string,p:Partial<Tx>)=>save(txs.map(x=>x.id===id?{...x,...p}:x));return <main className="shell"><aside className="sidebar"><div className="brand"><span className="brandmark">P</span><span>Pocketview</span></div><nav><button className={`nav ${view==="overview"?"active":""}`} onClick={()=>setView("overview")}><span>⌂</span>Overview</button><button className={`nav ${view==="transactions"?"active":""}`} onClick={()=>setView("transactions")}><span>⇄</span>Classify transactions <b className="badge">{txs.filter(x=>x.category==="Unclassified").length}</b></button></nav><div className="sideBottom"><button className="nav"><span>?</span>Help & security</button><div className="profile"><div className="avatar">JB</div><div><b>Personal budget</b><small>Stored on this device</small></div></div></div></aside><section className="content">{notice&&<div className="notice"><span>✓</span>{notice}<button onClick={()=>setNotice("")}>×</button></div>}{view==="overview"?<><header><div><p className="eyebrow">YOUR FINANCIAL PICTURE</p><h1>Your money, made clear.</h1><p className="sub">Built around your ANZ transaction history.</p></div><div className="actions"><button className="import" onClick={()=>file.current?.click()}>＋ Import ANZ CSV</button><input ref={file} hidden type="file" accept=".csv" onChange={e=>upload(e.target.files?.[0])}/></div></header><section className="heroGrid"><article className="balanceCard"><div className="cardTop"><span>Available after spending</span><span className="positive">Device-private</span></div><div className="bigMoney">{money(totals.left)}</div><div className="bar"><i style={{width:`${Math.min(100,totals.income?totals.spent/totals.income*100:0)}%`}}/></div><div className="balanceMeta"><div><small>INCOME</small><b>{money(totals.income)}</b></div><div><small>SPENT</small><b>{money(totals.spent)}</b></div><div><small>SAVINGS RATE</small><b>{totals.income?Math.round(totals.left/totals.income*100):0}%</b></div></div></article><article className="insight"><div className="spark">✦</div><div><small>CLASSIFICATION HEALTH</small><h3>{txs.filter(x=>x.category==="Unclassified").length} transactions need review.</h3><p>Correct a merchant once and Pocketview will remember it for future imports.</p><button onClick={()=>setView("transactions")}>Review transactions →</button></div></article></section><section className="sectionHead"><div><h2>Where your money went</h2><p>Using the category structure from your budget workbook</p></div></section><section className="budgetGrid">{spend.map(x=><article className="budgetCard" key={x.name}><div className="budgetTitle"><span className="catIcon" style={{background:colours[x.name]}}>{x.name[0]}</span><div><b>{x.name}</b><small>{Math.round(x.spent/x.limit*100)}% of guide</small></div><span>{money(x.spent)}</span></div><div className="miniBar"><i style={{width:`${Math.min(100,x.spent/x.limit*100)}%`,background:colours[x.name]}}/></div><div className="budgetFoot"><span>{money(Math.max(0,x.limit-x.spent))} left</span><span>of {money(x.limit)}</span></div></article>)}</section></>:<><header><div><p className="eyebrow">TRANSACTION WORKBENCH</p><h1>Make every transaction meaningful.</h1><p className="sub">Clean merchants, add context, and teach Pocketview your categories.</p></div><div className="actions"><button className="import" onClick={()=>file.current?.click()}>＋ Import ANZ CSV</button><input ref={file} hidden type="file" accept=".csv" onChange={e=>upload(e.target.files?.[0])}/></div></header><section className="reviewStats"><article><small>TRANSACTIONS</small><b>{txs.length}</b></article><article><small>NEEDS REVIEW</small><b>{txs.filter(x=>x.category==="Unclassified").length}</b></article><article><small>LEARNED RULES</small><b>{rules.length}</b></article></section><section className="workbench"><div className="toolbar"><label className="search">⌕<input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search merchant or note"/></label></div>{shown.map(t=><article className={`classRow ${t.category==="Unclassified"?"needsReview":""}`} key={t.id}><div className="txMain"><i>{t.merchant[0]}</i><div><b>{t.merchant}</b><small>{t.date} · {t.description}</small>{t.note&&<p>ANZ note: {t.note}</p>}</div><strong className={t.amount>0?"credit":""}>{t.amount>0?"+":""}{money(t.amount)}</strong></div><div className="classControls"><label>CATEGORY<select value={t.category} onChange={e=>update(t.id,{category:e.target.value})}>{categories.map(x=><option key={x}>{x}</option>)}</select></label><label>WHAT IT MEANS<input value={t.detail} placeholder="e.g. School fees" onChange={e=>update(t.id,{detail:e.target.value})}/></label><button className="remember" onClick={()=>{const rule={match:t.merchant.toLowerCase(),category:t.category,detail:t.detail},next=[...rules.filter(r=>r.match!==rule.match),rule];setRules(next);localStorage.setItem("pocketview-rules",JSON.stringify(next));setNotice(`Rule saved for ${t.merchant}.`)}}>Remember merchant</button></div></article>)}</section></>}<footer><span>Transactions and rules stay in this browser.</span><button onClick={()=>save(demo)}>Restore demo data</button></footer></section></main>}
+import { useEffect, useMemo, useRef, useState } from "react";
+type Tx = {
+    id: string;
+    date: string;
+    amount: number;
+    description: string;
+    merchant: string;
+    note: string;
+    category: string;
+    detail: string;
+};
+type Rule = {
+    match: string;
+    category: string;
+    detail: string;
+};
+const categories = ["Food", "Personal", "Car", "Streaming", "Bills", "Inbound TFR", "Outbound TFR", "Unclassified"];
+const budget: Record<string, number> = { Food: 1050, Personal: 950, Car: 700, Streaming: 120, Bills: 650 };
+const colours: Record<string, string> = { Food: "#22a06b", Personal: "#9b51e0", Car: "#2f80ed", Streaming: "#8390a5", Bills: "#e6566f", "Inbound TFR": "#13a168", "Outbound TFR": "#f08b3e", Unclassified: "#a2a9b5" };
+const money = (n: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
+function merchant(s: string) { return s.replace(/^(VISA DEBIT PURCHASE CARD \d+|EFTPOS|ANZ INTERNET BANKING BPAY|ANZ MOBILE BANKING PAYMENT \d+ TO|PAYMENT (TO|FROM))\s*/i, "").replace(/\s+\{?\d{5,}\}?\s*$/g, "").replace(/\s{2,}.+$/, "").trim() || s; }
+function classify(s: string, a: number) { s = s.toLowerCase(); if (a > 0 && /salary|payroll|payment from/.test(s))
+    return "Inbound TFR"; if (a < 0 && /payment (to|\d+ to)/.test(s))
+    return "Outbound TFR"; if (/woolworth|coles|aldi|\biga\b|milk bar|cafe|restaurant|lunch|breakfast|dinner/.test(s))
+    return "Food"; if (/petrol|vicroads|linkt|toll|parking|car wash|ampol|caltex/.test(s))
+    return "Car"; if (/agl|energy|telstra|optus|water|insurance/.test(s))
+    return "Bills"; if (/spotify|netflix|prime|youtube|disney|audible|crunchyroll|chatgpt|stan\b/.test(s))
+    return "Streaming"; if (/chemist|medical|pharmacy|bunnings|kmart|big w|school fees|st marys/.test(s))
+    return "Personal"; if (/account servicing fee/.test(s))
+    return a > 0 ? "Inbound TFR" : "Outbound TFR"; return "Unclassified"; }
+function split(line: string) { const out: string[] = []; let v = "", q = false; for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"' && line[i + 1] === '"') {
+        v += '"';
+        i++;
+    }
+    else if (c === '"')
+        q = !q;
+    else if (c === ',' && !q) {
+        out.push(v.trim());
+        v = "";
+    }
+    else
+        v += c;
+} out.push(v.trim()); return out; }
+function parseCsv(csv: string, rules: Rule[]): Tx[] { const lines = csv.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean); if (!lines.length)
+    throw Error("No transactions found"); const first = split(lines[0]); const headed = !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(first[0]); let date = 0, amount = 1, description = 2, note = 7, rows = lines; if (headed) {
+    const h = first.map(x => x.toLowerCase());
+    const find = (...n: string[]) => h.findIndex(x => n.some(y => x.includes(y)));
+    date = find("date");
+    amount = find("amount");
+    description = find("description", "details", "narrative");
+    note = find("note", "memo");
+    rows = lines.slice(1);
+    if (date < 0 || amount < 0 || description < 0)
+        throw Error("Could not identify the date, description and amount columns");
+} return rows.map((line, i) => { const c = split(line), raw = c[description] || "Transaction", a = Number((c[amount] || "").replace(/[$,\s]/g, "")), m = merchant(raw), n = note >= 0 ? (c[note] || "") : "", rule = rules.find(r => raw.toLowerCase().includes(r.match)); return { id: `anz-${Date.now()}-${i}`, date: c[date], amount: a, description: raw, merchant: m, note: n, category: rule?.category || classify(`${raw} ${n}`, a), detail: rule?.detail || n }; }).filter(x => Number.isFinite(x.amount) && x.amount !== 0); }
+const demo: Tx[] = [{ id: "1", date: "31/07/2026", amount: -247, description: "PAYMENT TO ST MARYS COLLEGE SCHOOL FEES 40055", merchant: "ST MARYS COLLEGE SCHOOL FEES", note: "", category: "Personal", detail: "School Fees" }, { id: "2", date: "30/07/2026", amount: -103.1, description: "VISA DEBIT PURCHASE CARD 6012 NDC SERVICE CO P/L SHEPPARTON", merchant: "NDC SERVICE CO P/L", note: "", category: "Unclassified", detail: "" }, { id: "3", date: "28/07/2026", amount: -28, description: "VISA DEBIT PURCHASE CARD 6012 POPLAR AVENUE MILK BAR SHEPPARTON", merchant: "POPLAR AVENUE MILK BAR", note: "", category: "Food", detail: "Takeout" }, { id: "4", date: "25/07/2026", amount: 6240, description: "SALARY PAYMENT", merchant: "SALARY PAYMENT", note: "", category: "Inbound TFR", detail: "Salary" }];
+export default function Home() { const [view, setView] = useState<"overview" | "transactions" | "category">("overview"), [txs, setTxs] = useState<Tx[]>(demo), [rules, setRules] = useState<Rule[]>([]), [customCategories, setCustomCategories] = useState<string[]>([]), [newCategory, setNewCategory] = useState(""), [selectedCategory, setSelectedCategory] = useState("Food"), [reviewOnly, setReviewOnly] = useState(false), [query, setQuery] = useState(""), [notice, setNotice] = useState(""); const file = useRef<HTMLInputElement>(null); useEffect(() => { try {
+    const t = localStorage.getItem("pocketview-v2"), r = localStorage.getItem("pocketview-rules"), c = localStorage.getItem("pocketview-categories");
+    if (t)
+        setTxs(JSON.parse(t));
+    if (r)
+        setRules(JSON.parse(r));
+    if (c)
+        setCustomCategories(JSON.parse(c));
+}
+catch { } }, []); const save = (x: Tx[]) => { setTxs(x); localStorage.setItem("pocketview-v2", JSON.stringify(x)); }; const allCategories = [...categories, ...customCategories]; const totals = useMemo(() => { const income = txs.filter(x => x.amount > 0).reduce((a, x) => a + x.amount, 0), spent = Math.abs(txs.filter(x => x.amount < 0 && !x.category.includes("TFR")).reduce((a, x) => a + x.amount, 0)); return { income, spent, left: income - spent }; }, [txs]); const spend = allCategories.filter(name => !name.includes("TFR") && name !== "Unclassified").map(name => ({ name, limit: budget[name] || 0, spent: Math.abs(txs.filter(x => x.category === name && x.amount < 0).reduce((a, x) => a + x.amount, 0)) })).filter(x => x.spent > 0 || x.limit > 0); const shown = txs.filter(x => (!reviewOnly || x.category === "Unclassified") && `${x.merchant} ${x.description} ${x.note}`.toLowerCase().includes(query.toLowerCase())); const addCategory = () => { const name = newCategory.trim(); if (!name || allCategories.some(x => x.toLowerCase() === name.toLowerCase())) return; const next = [...customCategories, name]; setCustomCategories(next); localStorage.setItem("pocketview-categories", JSON.stringify(next)); setNewCategory(""); setNotice(`Category “${name}” added.`); }; const applyLearnings = () => { const next = txs.map(t => { const rule = rules.find(r => `${t.merchant} ${t.description}`.toLowerCase().includes(r.match)); return rule ? { ...t, category: rule.category, detail: rule.detail } : t; }); save(next); setReviewOnly(true); setNotice(`Applied ${rules.length} learned merchant rules. Only transactions needing review are shown.`); }; const upload = async (f?: File) => { if (!f)
+    return; try {
+    const x = parseCsv(await f.text(), rules);
+    save(x);
+    setNotice(`${x.length} transactions imported · ${x.filter(t => t.category === "Unclassified").length} need review.`);
+    setView("transactions");
+}
+catch (e) {
+    setNotice(e instanceof Error ? e.message : "Could not read that file");
+} }; const update = (id: string, p: Partial<Tx>) => save(txs.map(x => x.id === id ? { ...x, ...p } : x)); return <main className="shell">
+<aside className="sidebar">
+<div className="brand">
+<span className="brandmark">P</span>
+<span>Pocketview</span>
+</div>
+<nav>
+<button className={`nav ${view === "overview" ? "active" : ""}`} onClick={() => setView("overview")}>
+<span>⌂</span>Overview</button>
+<button className={`nav ${view === "transactions" ? "active" : ""}`} onClick={() => setView("transactions")}>
+<span>⇄</span>Classify transactions <b className="badge">
+{txs.filter(x => x.category === "Unclassified").length}</b>
+</button>
+</nav>
+<div className="sideBottom">
+<button className="nav">
+<span>?</span>Help & security</button>
+<div className="profile">
+<div className="avatar">JB</div>
+<div>
+<b>Personal budget</b>
+<small>Stored on this device</small>
+</div>
+</div>
+</div>
+</aside>
+<section className="content">
+{notice && <div className="notice">
+<span>✓</span>
+{notice}<button onClick={() => setNotice("")}>×</button>
+</div>}{view === "overview" ? <>
+<header>
+<div>
+<p className="eyebrow">YOUR FINANCIAL PICTURE</p>
+<h1>Your money, made clear.</h1>
+<p className="sub">Built around your ANZ transaction history.</p>
+</div>
+<div className="actions">
+<button className="import" onClick={() => file.current?.click()}>＋ Import ANZ CSV</button>
+<input ref={file} hidden type="file" accept=".csv" onChange={e => upload(e.target.files?.[0])}/>
+</div>
+</header>
+<section className="heroGrid">
+<article className="balanceCard">
+<div className="cardTop">
+<span>Available after spending</span>
+<span className="positive">Device-private</span>
+</div>
+<div className="bigMoney">
+{money(totals.left)}</div>
+<div className="bar">
+<i style={{ width: `${Math.min(100, totals.income ? totals.spent / totals.income * 100 : 0)}%` }}/>
+</div>
+<div className="balanceMeta">
+<div>
+<small>INCOME</small>
+<b>
+{money(totals.income)}</b>
+</div>
+<div>
+<small>SPENT</small>
+<b>
+{money(totals.spent)}</b>
+</div>
+<div>
+<small>SAVINGS RATE</small>
+<b>
+{totals.income ? Math.round(totals.left / totals.income * 100) : 0}%</b>
+</div>
+</div>
+</article>
+<article className="insight">
+<div className="spark">✦</div>
+<div>
+<small>CLASSIFICATION HEALTH</small>
+<h3>
+{txs.filter(x => x.category === "Unclassified").length} transactions need review.</h3>
+<p>Correct a merchant once and Pocketview will remember it for future imports.</p>
+<button onClick={() => setView("transactions")}>Review transactions →</button>
+</div>
+</article>
+</section>
+<section className="sectionHead">
+<div>
+<h2>Where your money went</h2>
+<p>Using the category structure from your budget workbook</p>
+</div>
+</section>
+<section className="budgetGrid">
+{spend.map(x =>
+<article className="budgetCard clickable" tabIndex={0} role="button" key={x.name} onClick={() => { setSelectedCategory(x.name); setView("category"); }} onKeyDown={e => { if (e.key === "Enter") { setSelectedCategory(x.name); setView("category"); } }}>
+<div className="budgetTitle">
+<span className="catIcon" style={{ background: colours[x.name] || "#625bf6" }}>
+{x.name[0]}</span>
+<div>
+<b>
+{x.name}</b>
+<small>
+{x.limit ? `${Math.round(x.spent / x.limit * 100)}% of guide` : "Custom category"}</small>
+</div>
+<span>
+{money(x.spent)}</span>
+</div>
+<div className="miniBar">
+<i style={{ width: `${x.limit ? Math.min(100, x.spent / x.limit * 100) : 100}%`, background: colours[x.name] || "#625bf6" }}/>
+</div>
+<div className="budgetFoot">
+<span>
+{x.limit ? `${money(Math.max(0, x.limit - x.spent))} left` : `${txs.filter(t => t.category === x.name).length} transactions`}</span>
+<span>{x.limit ? `of ${money(x.limit)}` : "View details →"}</span>
+</div>
+</article>)}</section>
+</> : view === "category" ? <>
+<header><div><p className="eyebrow">CATEGORY DETAIL</p><h1>{selectedCategory}</h1><p className="sub">Every transaction currently classified in this category.</p></div><div className="actions"><button className="backButton" onClick={() => setView("overview")}>← Back to overview</button></div></header>
+<section className="categorySummary"><span>Total spent</span><b>{money(Math.abs(txs.filter(t => t.category === selectedCategory && t.amount < 0).reduce((a, t) => a + t.amount, 0)))}</b><small>{txs.filter(t => t.category === selectedCategory).length} transactions</small></section>
+<section className="transactions categoryTransactions"><div className="table"><div className="tr th"><span>MERCHANT</span><span>WHAT IT MEANS</span><span>DATE</span><span>AMOUNT</span></div>{txs.filter(t => t.category === selectedCategory).map(t => <div className="tr" key={t.id}><span className="merchant"><i>{t.merchant[0]}</i><b>{t.merchant}</b></span><span>{t.detail || "—"}</span><span>{t.date}</span><span className={t.amount > 0 ? "credit" : ""}>{t.amount > 0 ? "+" : ""}{money(t.amount)}</span></div>)}</div></section>
+</> : <>
+<header>
+<div>
+<p className="eyebrow">TRANSACTION WORKBENCH</p>
+<h1>Make every transaction meaningful.</h1>
+<p className="sub">Clean merchants, add context, and teach Pocketview your categories.</p>
+</div>
+<div className="actions">
+<button className="import" onClick={() => file.current?.click()}>＋ Import ANZ CSV</button>
+<input ref={file} hidden type="file" accept=".csv" onChange={e => upload(e.target.files?.[0])}/>
+</div>
+</header>
+<section className="reviewStats">
+<article>
+<small>TRANSACTIONS</small>
+<b>
+{txs.length}</b>
+</article>
+<article>
+<small>NEEDS REVIEW</small>
+<b>
+{txs.filter(x => x.category === "Unclassified").length}</b>
+</article>
+<article>
+<small>LEARNED RULES</small>
+<b>
+{rules.length}</b>
+</article>
+</section>
+<section className="workbench">
+<div className="toolbar">
+<label className="search">⌕<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search merchant or note"/>
+</label>
+<label className="reviewToggle"><input type="checkbox" checked={reviewOnly} onChange={e => setReviewOnly(e.target.checked)}/> Needs review only</label>
+<button className="applyRules" onClick={applyLearnings}>↻ Apply learned rules</button>
+</div>
+<div className="categoryMaker"><div><b>Add a category</b><small>Create a category, then assign transactions to it below.</small></div><input value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addCategory(); }} placeholder="e.g. Holidays"/><button onClick={addCategory}>Add category</button></div>
+{shown.map(t =>
+<article className={`classRow ${t.category === "Unclassified" ? "needsReview" : ""}`} key={t.id}>
+<div className="txMain">
+<i>
+{t.merchant[0]}</i>
+<div>
+<b>
+{t.merchant}</b>
+<small>
+{t.date} · {t.description}</small>
+{t.note && <p>ANZ note: {t.note}</p>}</div>
+<strong className={t.amount > 0 ? "credit" : ""}>
+{t.amount > 0 ? "+" : ""}{money(t.amount)}</strong>
+</div>
+<div className="classControls">
+<label>CATEGORY<select value={t.category} onChange={e => update(t.id, { category: e.target.value })}>
+{allCategories.map(x =>
+<option key={x}>
+{x}</option>)}</select>
+</label>
+<label>WHAT IT MEANS<input value={t.detail} placeholder="e.g. School fees" onChange={e => update(t.id, { detail: e.target.value })}/>
+</label>
+<button className="remember" onClick={() => { const rule = { match: t.merchant.toLowerCase(), category: t.category, detail: t.detail }, next = [...rules.filter(r => r.match !== rule.match), rule]; setRules(next); localStorage.setItem("pocketview-rules", JSON.stringify(next)); setNotice(`Rule saved for ${t.merchant}. Click “Apply learned rules” to update the list.`); }}>Remember merchant</button>
+</div>
+</article>)}</section>
+</>}<footer>
+<span>Transactions and rules stay in this browser.</span>
+<button onClick={() => save(demo)}>Restore demo data</button>
+</footer>
+</section>
+</main>; }
