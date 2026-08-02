@@ -58,7 +58,30 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /Export Master JSON/);
   assert.match(page, /Linked Rule ID/);
   assert.match(page, /MASTER DATA CHANGE HISTORY/);
+  assert.match(page, /Use Suggestions For Selected/);
+  assert.match(page, /ABS Place Reference/);
+  assert.match(page, /Archive And Clear All Data/);
+  assert.match(page, /sourceText = await pending\.file\.text\(\), parsed = parseCsv\(sourceText, \{ bank, account/);
+  assert.doesNotMatch(page, /parseCsv\(await pending\.file\.text\(\), rules/);
+  assert.match(page, /original CSV files are saved locally/);
   assert.doesNotMatch(page, /const canonicalKey = .*replace\(\/\\b\\d\{4,/);
+});
+
+test("bundles the official Australian locality reference and local archive support", async () => {
+  const [places, intelligence, archive] = await Promise.all([
+    readFile(new URL("../app/australian-places.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/place-intelligence.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/local-archive.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(places, /Australian Statistical Geography Standard/);
+  assert.match(places, /Shepparton/);
+  assert.match(places, /"count": 15334/);
+  assert.match(intelligence, /predictAustralianPlace/);
+  assert.match(intelligence, /uniqueStates\.size > 1/);
+  assert.match(archive, /indexedDB\.open/);
+  assert.match(archive, /saveLocalArchive/);
+  assert.match(archive, /source-files/);
+  assert.match(archive, /replaceLocalSourceFiles/);
 });
 
 test("includes the shared pastel interface system", async () => {
