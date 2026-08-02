@@ -42,6 +42,15 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /View \$\{matchingTransactions.length\} Matches/);
   assert.match(page, /Manage Imported Accounts/);
   assert.match(page, /Bank", "Account Name", "Source File/);
+  assert.match(page, /const canonicalKey = .*t\.description.*t\.note/);
+  assert.match(page, /const legacyCanonicalKey =/);
+  assert.match(page, /const mergeRules =/);
+  assert.match(page, /snapshot = \(includeTransactions = false\)/);
+  assert.match(page, /\.slice\(0, 100\)/);
+  assert.match(page, /Open Learning Rules/);
+  assert.match(page, /"Category Detail", "Place"/);
+  assert.match(page, /Suburb, Town Or City/);
+  assert.doesNotMatch(page, /const canonicalKey = .*replace\(\/\\b\\d\{4,/);
 });
 
 test("includes the shared pastel interface system", async () => {
