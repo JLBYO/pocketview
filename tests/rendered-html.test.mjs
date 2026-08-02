@@ -50,6 +50,14 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /Open Learning Rules/);
   assert.match(page, /"Category Detail", "Place"/);
   assert.match(page, /Suburb, Town Or City/);
+  assert.match(page, /const matchTerms = .*split\(\/\\s\*&\\s\*\//);
+  assert.match(page, /terms\.every\(term => description\.includes\(term\)\)/);
+  assert.match(page, /ruleId\?: string/);
+  assert.match(page, /deleteMasterAndLinkedRule/);
+  assert.match(page, /deleteRuleAndLinkedMaster/);
+  assert.match(page, /Export Master JSON/);
+  assert.match(page, /Linked Rule ID/);
+  assert.match(page, /MASTER DATA CHANGE HISTORY/);
   assert.doesNotMatch(page, /const canonicalKey = .*replace\(\/\\b\\d\{4,/);
 });
 
@@ -68,5 +76,7 @@ test("includes the shared pastel interface system", async () => {
   assert.match(features, /\.importModalBackdrop/);
   assert.match(features, /\.ruleMatchPanel/);
   assert.match(features, /\.accountManagement/);
+  assert.match(features, /\.ruleMatchField/);
+  assert.match(features, /\.masterRuleLink/);
   assert.match(layout, /Pocketview/);
 });
