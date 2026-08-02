@@ -65,6 +65,10 @@ test("keeps transaction classification user-driven", async () => {
   assert.doesNotMatch(page, /parseCsv\(await pending\.file\.text\(\), rules/);
   assert.match(page, /original CSV files are saved locally/);
   assert.doesNotMatch(page, /const canonicalKey = .*replace\(\/\\b\\d\{4,/);
+  assert.match(page, /const categories = \["Unclassified"\]/);
+  assert.match(page, /const defaultBudget: Record<string, number> = \{\}/);
+  assert.match(page, /place = predictAustralianPlace\(`\$\{raw\} \$\{n\}`\)\?\.place \|\| ""/);
+  assert.doesNotMatch(page, /const categories = \["Food"/);
 });
 
 test("bundles the official Australian locality reference and local archive support", async () => {
