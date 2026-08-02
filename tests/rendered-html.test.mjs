@@ -69,6 +69,8 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /const defaultBudget: Record<string, number> = \{\}/);
   assert.match(page, /place = predictAustralianPlace\(`\$\{raw\} \$\{n\}`\)\?\.place \|\| ""/);
   assert.doesNotMatch(page, /const categories = \["Food"/);
+  assert.match(page, /normalizeStoredPlace/);
+  assert.match(page, /localStorage\.setItem\("pocketview-v2", JSON\.stringify\(normalizedTransactions\)\)/);
 });
 
 test("bundles the official Australian locality reference and local archive support", async () => {
@@ -82,10 +84,35 @@ test("bundles the official Australian locality reference and local archive suppo
   assert.match(places, /"count": 15334/);
   assert.match(intelligence, /predictAustralianPlace/);
   assert.match(intelligence, /uniqueStates\.size > 1/);
+  assert.match(intelligence, /stateDisplayNames/);
+  assert.match(intelligence, /b\.wordIndex - a\.wordIndex/);
   assert.match(archive, /indexedDB\.open/);
   assert.match(archive, /saveLocalArchive/);
   assert.match(archive, /source-files/);
   assert.match(archive, /replaceLocalSourceFiles/);
+});
+
+test("formats Australian states and prefers the final locality in a bank description", async () => {
+  const [placesSource, intelligenceSource, ts] = await Promise.all([
+    readFile(new URL("../app/australian-places.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/place-intelligence.ts", import.meta.url), "utf8"),
+    import("typescript"),
+  ]);
+  const dataStart = placesSource.indexOf("= ", placesSource.indexOf("export const australianPlaces")) + 2;
+  const places = JSON.parse(placesSource.slice(dataStart, placesSource.lastIndexOf(";")));
+  const testableSource = intelligenceSource.replace(
+    'import { australianPlaces, australianPlaceSource } from "./australian-places";',
+    "const { australianPlaces, australianPlaceSource } = globalThis.__placeFixture;",
+  );
+  const compiled = ts.transpileModule(testableSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const testModule = { exports: {} };
+  new Function("exports", "module", "globalThis", compiled)(testModule.exports, testModule, { __placeFixture: { australianPlaces: places, australianPlaceSource: { count: places.length } } });
+  const { predictAustralianPlace } = testModule.exports;
+  assert.equal(predictAustralianPlace("BWS LIQUOR/BENALLA RD SHEPPARTON").place, "Shepparton, Victoria");
+  assert.equal(predictAustralianPlace("CARD PURCHASE COBURG VIC").place, "Coburg, Victoria");
+  assert.equal(predictAustralianPlace("PAYMENT BEGA NSW").place, "Bega, NSW");
+  assert.doesNotMatch(predictAustralianPlace("CARD PURCHASE SHEPPARTON").place, /, 2$/);
+  assert.equal(testModule.exports.formatAustralianStateCode("2"), "Victoria");
 });
 
 test("includes the shared pastel interface system", async () => {

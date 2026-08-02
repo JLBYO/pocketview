@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { australianPlaceCount, australianPlaceReference, predictAustralianPlace } from "./place-intelligence";
+import { australianPlaceCount, australianPlaceReference, formatAustralianStateCode, predictAustralianPlace } from "./place-intelligence";
 import { deleteLocalArchive, getLocalArchive, listLocalArchives, listLocalSourceFiles, replaceLocalSourceFiles, saveLocalArchive } from "./local-archive";
 import type { LocalArchiveRecord, LocalArchiveSummary, LocalSourceFile } from "./local-archive";
 type Tx = {
@@ -70,7 +70,8 @@ const mergeRules = (current: Rule[], additions: Rule[]) => [...current, ...addit
 const mergeMaster = (current: MasterItem[], additions: MasterItem[]) => [...current, ...additions].filter((item, index, all) => all.findLastIndex(candidate => candidate.id === item.id) === index);
 const accountKey = (t: Pick<Tx, "bank" | "account">) => `${normalizeKey(t.bank)}|${normalizeKey(t.account)}`;
 const duplicateKey = (t: Tx) => [accountKey(t), dateKey(t.date), t.amount.toFixed(2), normalizeKey(t.description), normalizeKey(t.note)].join("|");
-const normalizeTransaction = (t: Partial<Tx>, index: number): Tx => ({ id: t.id || `legacy-${index}`, bank: t.bank?.trim() || "ANZ", account: t.account?.trim() || "Primary Account", sourceFile: t.sourceFile || "Legacy Import", importId: t.importId || "legacy-import", date: t.date || "", amount: Number(t.amount) || 0, description: t.description || "Transaction", merchant: t.merchant || t.description || "Transaction", note: t.note || "", direction: t.direction || (Number(t.amount) >= 0 ? "Inbound" : "Outbound"), category: t.category || "Unclassified", detail: t.detail || "", place: t.place || "" });
+const normalizeStoredPlace = (t: Partial<Tx>) => { const stored = t.place?.trim() || "", numeric = stored.match(/^(.*),\s*([1-9])$/); if (!numeric) return stored; return predictAustralianPlace(`${t.description || ""} ${t.note || ""}`)?.place || `${numeric[1]}, ${formatAustralianStateCode(numeric[2])}`; };
+const normalizeTransaction = (t: Partial<Tx>, index: number): Tx => ({ id: t.id || `legacy-${index}`, bank: t.bank?.trim() || "ANZ", account: t.account?.trim() || "Primary Account", sourceFile: t.sourceFile || "Legacy Import", importId: t.importId || "legacy-import", date: t.date || "", amount: Number(t.amount) || 0, description: t.description || "Transaction", merchant: t.merchant || t.description || "Transaction", note: t.note || "", direction: t.direction || (Number(t.amount) >= 0 ? "Inbound" : "Outbound"), category: t.category || "Unclassified", detail: t.detail || "", place: normalizeStoredPlace(t) });
 const normalizeRule = (r: Partial<Rule>, index = 0): Rule => ({ id: r.id || `rule-legacy-${index}-${normalizedRuleMatch(r.match || "").replace(/\s+/g, "-").slice(0, 36) || "unnamed"}`, match: r.match || "", merchant: r.merchant || "", category: r.category || "Unclassified", detail: r.detail || "", place: r.place || "", mode: r.mode === "contains" ? "contains" : "identity", sourceDescription: r.sourceDescription });
 const normalizeMaster = (m: Partial<MasterItem>, index: number): MasterItem => ({ id: m.id || `master-legacy-${index}`, ruleId: m.ruleId || undefined, direction: m.direction === "Inbound" ? "Inbound" : "Outbound", originalMerchant: m.originalMerchant || "", merchant: m.merchant || "", category: m.category || "Unclassified", detail: m.detail || "", place: m.place || "" });
 const ruleMatches = (t: Tx, r: Rule) => { const terms = matchTerms(r.match); if (!terms.length) return false; if (r.mode === "contains") { const description = normalizeKey(t.description); return terms.every(term => description.includes(term)); } const match = terms.join(" "); return canonicalKey(t) === match || legacyCanonicalKey(t) === match; };
@@ -183,8 +184,11 @@ const file = useRef<HTMLInputElement>(null), knowledgeFile = useRef<HTMLInputEle
 /* eslint-disable react-hooks/set-state-in-effect */
 useEffect(() => { listLocalArchives().then(setLocalArchives).catch(() => setLocalArchives([])); try {
     const t = localStorage.getItem("pocketview-v2"), r = localStorage.getItem("pocketview-rules"), c = localStorage.getItem("pocketview-categories"), m = localStorage.getItem("pocketview-master"), i = localStorage.getItem("pocketview-imports"), s = localStorage.getItem("pocketview-savings-target"), b = localStorage.getItem("pocketview-budget-guides"), e = localStorage.getItem("pocketview-exclude-transfers"), a = localStorage.getItem("pocketview-audit");
-    if (t)
-        setTxs((JSON.parse(t) as Partial<Tx>[]).map(normalizeTransaction));
+    if (t) {
+        const normalizedTransactions = (JSON.parse(t) as Partial<Tx>[]).map(normalizeTransaction);
+        setTxs(normalizedTransactions);
+        localStorage.setItem("pocketview-v2", JSON.stringify(normalizedTransactions));
+    }
     const restoredRules = r ? (JSON.parse(r) as Partial<Rule>[]).map(normalizeRule) : [];
     if (r) {
         setRules(restoredRules);
