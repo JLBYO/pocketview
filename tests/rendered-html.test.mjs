@@ -71,6 +71,10 @@ test("keeps transaction classification user-driven", async () => {
   assert.doesNotMatch(page, /const categories = \["Food"/);
   assert.match(page, /normalizeStoredPlace/);
   assert.match(page, /localStorage\.setItem\("pocketview-v2", JSON\.stringify\(normalizedTransactions\)\)/);
+  assert.match(page, /cleanTerms\.every\(term => description\.includes\(term\)\)/);
+  assert.match(page, /SMART BATCHES/);
+  assert.match(page, /Approve And Apply Batch/);
+  assert.match(page, /const applySmartBatch/);
 });
 
 test("bundles the official Australian locality reference and local archive support", async () => {
