@@ -35,9 +35,9 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /recurringPayments/);
   assert.match(page, /30-DAY SPEND FORECAST/);
   assert.match(page, /Undo Latest Change/);
-  assert.match(page, /Export Encrypted Backup/);
+  assert.match(page, /Save Encrypted History Backup/);
   assert.match(page, /multiple type="file"/);
-  assert.match(page, /Confirm Each Bank And Account/);
+  assert.match(page, /Add Transactions To Your History/);
   assert.match(page, /duplicateKey/);
   assert.match(page, /View \$\{matchingTransactions.length\} Matches/);
   assert.match(page, /Manage Imported Accounts/);
@@ -63,7 +63,7 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /Archive And Clear All Data/);
   assert.match(page, /sourceText = await pending\.file\.text\(\), parsed = parseCsv\(sourceText, \{ bank, account/);
   assert.doesNotMatch(page, /parseCsv\(await pending\.file\.text\(\), rules/);
-  assert.match(page, /original CSV files are saved locally/);
+  assert.match(page, /every selected original CSV is stored/);
   assert.doesNotMatch(page, /const canonicalKey = .*replace\(\/\\b\\d\{4,/);
   assert.match(page, /const categories = \["Unclassified"\]/);
   assert.match(page, /const defaultBudget: Record<string, number> = \{\}/);
@@ -75,6 +75,13 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /SMART BATCHES/);
   assert.match(page, /Approve And Apply Batch/);
   assert.match(page, /const applySmartBatch/);
+  assert.match(page, /let combined: Tx\[\] = \[\.\.\.txs\]/);
+  assert.match(page, /existing transactions were skipped/);
+  assert.match(page, /Add Transactions To Your History/);
+  assert.match(page, /INCREMENTAL IMPORT HISTORY/);
+  assert.match(page, /firstDate\?: string; lastDate\?: string/);
+  assert.match(page, /sourceFiles = await listLocalSourceFiles\(\)/);
+  assert.match(page, /await replaceLocalSourceFiles\(Array\.isArray\(payload\.sourceFiles\)/);
 });
 
 test("bundles the official Australian locality reference and local archive support", async () => {
@@ -94,6 +101,31 @@ test("bundles the official Australian locality reference and local archive suppo
   assert.match(archive, /saveLocalArchive/);
   assert.match(archive, /source-files/);
   assert.match(archive, /replaceLocalSourceFiles/);
+  assert.match(archive, /appendLocalSourceFiles/);
+  assert.match(archive, /getLocalSourceFile/);
+  assert.match(archive, /active-state/);
+  assert.match(archive, /saveLocalActiveState/);
+  assert.match(archive, /clearLocalActiveState/);
+});
+
+test("appends only new transaction occurrences while retaining legitimate repeats", async () => {
+  const [source, ts] = await Promise.all([
+    readFile(new URL("../app/incremental-import.ts", import.meta.url), "utf8"),
+    import("typescript"),
+  ]);
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const testModule = { exports: {} };
+  new Function("exports", "module", compiled)(testModule.exports, testModule);
+  const { mergeUniqueByOccurrence } = testModule.exports;
+  const existing = [{ key: "same", id: "old-1" }, { key: "same", id: "old-2" }, { key: "other", id: "old-3" }];
+  const incoming = [{ key: "same", id: "csv-1" }, { key: "same", id: "csv-2" }, { key: "same", id: "csv-3" }, { key: "other", id: "csv-4" }, { key: "new", id: "csv-5" }];
+  const first = mergeUniqueByOccurrence(existing, incoming, record => record.key);
+  assert.deepEqual(first.added.map(record => record.id), ["csv-3", "csv-5"]);
+  assert.equal(first.records.length, 5);
+  assert.equal(first.skippedCount, 3);
+  const repeated = mergeUniqueByOccurrence(first.records, incoming, record => record.key);
+  assert.equal(repeated.added.length, 0);
+  assert.equal(repeated.skippedCount, incoming.length);
 });
 
 test("formats Australian states and prefers the final locality in a bank description", async () => {

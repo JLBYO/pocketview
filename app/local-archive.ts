@@ -21,13 +21,15 @@ export type LocalSourceFile = {
 const databaseName = "pocketview-local-data";
 const storeName = "archives";
 const sourceStoreName = "source-files";
+const activeStoreName = "active-state";
 
 const openDatabase = () => new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 2);
+    const request = indexedDB.open(databaseName, 3);
     request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName, { keyPath: "id" });
         if (!database.objectStoreNames.contains(sourceStoreName)) database.createObjectStore(sourceStoreName, { keyPath: "id" });
+        if (!database.objectStoreNames.contains(activeStoreName)) database.createObjectStore(activeStoreName, { keyPath: "key" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -94,6 +96,54 @@ export async function replaceLocalSourceFiles(records: LocalSourceFile[]) {
     const store = transaction.objectStore(sourceStoreName);
     store.clear();
     records.forEach(record => store.put(record));
+    await complete(transaction);
+    database.close();
+}
+
+export async function appendLocalSourceFiles(records: LocalSourceFile[]) {
+    if (!records.length) return;
+    const database = await openDatabase();
+    const transaction = database.transaction(sourceStoreName, "readwrite");
+    const store = transaction.objectStore(sourceStoreName);
+    records.forEach(record => store.put(record));
+    await complete(transaction);
+    database.close();
+}
+
+export async function getLocalSourceFile(id: string): Promise<LocalSourceFile | undefined> {
+    const database = await openDatabase();
+    const request = database.transaction(sourceStoreName).objectStore(sourceStoreName).get(id);
+    const record = await new Promise<LocalSourceFile | undefined>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return record;
+}
+
+export async function getLocalActiveState<T>(key: string): Promise<T | undefined> {
+    const database = await openDatabase();
+    const request = database.transaction(activeStoreName).objectStore(activeStoreName).get(key);
+    const record = await new Promise<{ key: string; value: T } | undefined>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return record?.value;
+}
+
+export async function saveLocalActiveState<T>(key: string, value: T) {
+    const database = await openDatabase();
+    const transaction = database.transaction(activeStoreName, "readwrite");
+    transaction.objectStore(activeStoreName).put({ key, value });
+    await complete(transaction);
+    database.close();
+}
+
+export async function clearLocalActiveState() {
+    const database = await openDatabase();
+    const transaction = database.transaction(activeStoreName, "readwrite");
+    transaction.objectStore(activeStoreName).clear();
     await complete(transaction);
     database.close();
 }
