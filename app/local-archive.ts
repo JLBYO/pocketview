@@ -22,6 +22,7 @@ const databaseName = "pocketview-local-data";
 const storeName = "archives";
 const sourceStoreName = "source-files";
 const activeStoreName = "active-state";
+let expectedRevision: string | null = null;
 
 const openDatabase = () => new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(databaseName, 3);
@@ -31,8 +32,9 @@ const openDatabase = () => new Promise<IDBDatabase>((resolve, reject) => {
         if (!database.objectStoreNames.contains(sourceStoreName)) database.createObjectStore(sourceStoreName, { keyPath: "id" });
         if (!database.objectStoreNames.contains(activeStoreName)) database.createObjectStore(activeStoreName, { keyPath: "key" });
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
     request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Close other Pocketview tabs, then reload to finish updating local storage."));
 });
 
 const complete = (transaction: IDBTransaction) => new Promise<void>((resolve, reject) => {
@@ -124,11 +126,12 @@ export async function getLocalSourceFile(id: string): Promise<LocalSourceFile | 
 export async function getLocalActiveState<T>(key: string): Promise<T | undefined> {
     const database = await openDatabase();
     const request = database.transaction(activeStoreName).objectStore(activeStoreName).get(key);
-    const record = await new Promise<{ key: string; value: T } | undefined>((resolve, reject) => {
+    const record = await new Promise<{ key: string; value: T; revision?: string } | undefined>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
     });
     database.close();
+    if (key === "workspace") expectedRevision = record?.revision || null;
     return record?.value;
 }
 
@@ -147,3 +150,34 @@ export async function clearLocalActiveState() {
     await complete(transaction);
     database.close();
 }
+
+let pendingWrite: Promise<void> = Promise.resolve();
+
+/** One atomic commit for the workspace, its audit history and original import files. */
+export function saveLocalWorkspace<T>(workspace: T, sources: LocalSourceFile[] = [], replaceSources = false): Promise<void> {
+    const next = pendingWrite.catch(() => undefined).then(async () => {
+        if (!Array.isArray(sources) || sources.some(source => !source || typeof source.id !== "string" || !source.id || typeof source.name !== "string" || typeof source.text !== "string")) throw new Error("Invalid source files. Your saved history has not been changed.");
+        const database = await openDatabase();
+        try {
+            const transaction = database.transaction([activeStoreName, sourceStoreName], "readwrite");
+            const completion = complete(transaction);
+            const active = transaction.objectStore(activeStoreName), request = active.get("workspace"), revision = crypto.randomUUID();
+            let failure: Error | undefined;
+            request.onsuccess = () => {
+                try {
+                    if ((request.result?.revision || null) !== expectedRevision) throw new Error("History changed in another Pocketview tab. Reload before editing again; your newer saved history has been protected.");
+                    active.put({ key: "workspace", value: workspace, revision });
+                    const store = transaction.objectStore(sourceStoreName);
+                    if (replaceSources) store.clear();
+                    sources.forEach(source => store.put(source));
+                } catch (error) { failure = error instanceof Error ? error : new Error("Could not save history."); transaction.abort(); }
+            };
+            try { await completion; } catch (error) { throw failure || error; }
+            expectedRevision = revision;
+        } finally { database.close(); }
+    });
+    pendingWrite = next;
+    return next;
+}
+
+export async function flushLocalWorkspace(): Promise<void> { await pendingWrite; }

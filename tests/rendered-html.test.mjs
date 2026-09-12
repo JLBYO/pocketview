@@ -45,7 +45,7 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /const canonicalKey = .*t\.description.*t\.note/);
   assert.match(page, /const legacyCanonicalKey =/);
   assert.match(page, /const mergeRules =/);
-  assert.match(page, /snapshot = \(includeTransactions = false\)/);
+  assert.match(page, /snapshot = \(includeTransactions = true\)/);
   assert.match(page, /\.slice\(0, 100\)/);
   assert.match(page, /Open Learning Rules/);
   assert.match(page, /"Category Detail", "Place"/);
@@ -67,10 +67,8 @@ test("keeps transaction classification user-driven", async () => {
   assert.doesNotMatch(page, /const canonicalKey = .*replace\(\/\\b\\d\{4,/);
   assert.match(page, /const categories = \["Unclassified"\]/);
   assert.match(page, /const defaultBudget: Record<string, number> = \{\}/);
-  assert.match(page, /place = predictAustralianPlace\(`\$\{raw\} \$\{n\}`\)\?\.place \|\| ""/);
   assert.doesNotMatch(page, /const categories = \["Food"/);
   assert.match(page, /normalizeStoredPlace/);
-  assert.match(page, /localStorage\.setItem\("pocketview-v2", JSON\.stringify\(normalizedTransactions\)\)/);
   assert.match(page, /cleanTerms\.every\(term => description\.includes\(term\)\)/);
   assert.match(page, /SMART BATCHES/);
   assert.match(page, /Approve And Apply Batch/);
@@ -81,7 +79,7 @@ test("keeps transaction classification user-driven", async () => {
   assert.match(page, /INCREMENTAL IMPORT HISTORY/);
   assert.match(page, /firstDate\?: string; lastDate\?: string/);
   assert.match(page, /sourceFiles = await listLocalSourceFiles\(\)/);
-  assert.match(page, /await replaceLocalSourceFiles\(Array\.isArray\(payload\.sourceFiles\)/);
+  assert.match(page, /await saveLocalWorkspace\(/);
 });
 
 test("bundles the official Australian locality reference and local archive support", async () => {

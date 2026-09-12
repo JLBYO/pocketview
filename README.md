@@ -1,4 +1,10 @@
-# vinext-starter
+# Pocketview
+
+Private, local-first transaction classification and budgeting. See
+[Building Your Transaction History](docs/HISTORY.md) for incremental imports,
+encrypted backups and the Personal Life Assistant output.
+
+## Application Foundation
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
