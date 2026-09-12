@@ -1,4 +1,6 @@
 "use client";
+import TabHelp from "./tab-help";
+import AccountBoundary from "./account-boundary";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { australianPlaceCount, australianPlaceReference, formatAustralianStateCode, predictAustralianPlace } from "./place-intelligence";
 import { mergeUniqueByOccurrence } from "./incremental-import";
@@ -160,9 +162,11 @@ function parseCsv(csv: string, context: ImportContext): Tx[] {
 const demoContext = { bank: "ANZ", account: "Example Everyday Account", sourceFile: "Pocketview Example.csv", importId: "demo-import" };
 const demo: Tx[] = [{ id: "1", ...demoContext, date: "31/07/2026", amount: -247, description: "PAYMENT TO SCHOOL FEES 40055", merchant: "PAYMENT TO SCHOOL FEES 40055", note: "", category: "Unclassified", detail: "", place: "" }, { id: "2", ...demoContext, date: "30/07/2026", amount: -103.1, description: "CARD PURCHASE SERVICE CO 6012", merchant: "CARD PURCHASE SERVICE CO 6012", note: "", category: "Unclassified", detail: "", place: "" }, { id: "3", ...demoContext, date: "28/07/2026", amount: -28, description: "CARD PURCHASE LOCAL SHOP 6012", merchant: "CARD PURCHASE LOCAL SHOP 6012", note: "", category: "Unclassified", detail: "", place: "" }, { id: "4", ...demoContext, date: "25/07/2026", amount: 6240, description: "INCOMING PAYMENT", merchant: "INCOMING PAYMENT", note: "", category: "Unclassified", detail: "", place: "" }];
 /* Local browser state is intentionally hydrated once after mount. */
-export default function Home() {
+export default function Home() { return <AccountBoundary><PocketviewWorkspace/></AccountBoundary>; }
+function PocketviewWorkspace() {
 const [view, setView] = useState<"overview" | "budget" | "transactions" | "category" | "rules" | "master">("overview"), [txs, setTxs] = useState<Tx[]>([]), [rules, setRules] = useState<Rule[]>([]), [master, setMaster] = useState<MasterItem[]>([]), [imports, setImports] = useState<ImportBatch[]>([]), [pendingImports, setPendingImports] = useState<PendingImport[]>([]), [importing, setImporting] = useState(false), [accountDrafts, setAccountDrafts] = useState<Record<string, string>>({}), [drafts, setDrafts] = useState<Record<string, Partial<Tx>>>({}), [selectedTxIds, setSelectedTxIds] = useState<string[]>([]), [customCategories, setCustomCategories] = useState<string[]>([]), [newCategory, setNewCategory] = useState(""), [newRuleMatch, setNewRuleMatch] = useState(""), [newRuleKeyword, setNewRuleKeyword] = useState(""), [newRuleMerchant, setNewRuleMerchant] = useState(""), [newRulePlace, setNewRulePlace] = useState(""), [ruleSourceQuery, setRuleSourceQuery] = useState(""), [savingsTarget, setSavingsTarget] = useState(20), [budgetGuides, setBudgetGuides] = useState<Record<string, number>>(defaultBudget), [excludeTransfers, setExcludeTransfers] = useState(true), [auditLog, setAuditLog] = useState<AuditEntry[]>([]), [backupPassword, setBackupPassword] = useState(""), [selectedCategory, setSelectedCategory] = useState("Unclassified"), [reviewOnly, setReviewOnly] = useState(false), [workbenchDate, setWorkbenchDate] = useState("All"), [workbenchBank, setWorkbenchBank] = useState("All"), [workbenchAccount, setWorkbenchAccount] = useState("All"), [workbenchDirection, setWorkbenchDirection] = useState("All"), [workbenchPlace, setWorkbenchPlace] = useState("All"), [workbenchPage, setWorkbenchPage] = useState(0), [deepDivePage, setDeepDivePage] = useState(0), [query, setQuery] = useState(""), [appliedWorkbenchDate, setAppliedWorkbenchDate] = useState("All"), [appliedWorkbenchBank, setAppliedWorkbenchBank] = useState("All"), [appliedWorkbenchAccount, setAppliedWorkbenchAccount] = useState("All"), [appliedWorkbenchDirection, setAppliedWorkbenchDirection] = useState("All"), [appliedWorkbenchPlace, setAppliedWorkbenchPlace] = useState("All"), [appliedReviewOnly, setAppliedReviewOnly] = useState(false), [appliedQuery, setAppliedQuery] = useState(""), [fromDate, setFromDate] = useState(""), [toDate, setToDate] = useState(""), [bankSlice, setBankSlice] = useState("All"), [accountSlice, setAccountSlice] = useState("All"), [directionSlice, setDirectionSlice] = useState("All"), [categorySlice, setCategorySlice] = useState("All"), [detailSlice, setDetailSlice] = useState("All"), [placeSlice, setPlaceSlice] = useState("All"), [merchantSlice, setMerchantSlice] = useState("All"), [appliedFilters, setAppliedFilters] = useState({ from: "", to: "", bank: "All", account: "All", direction: "All", category: "All", detail: "All", place: "All", merchant: "All" }), [chartSelection, setChartSelection] = useState<{ month: string; direction: "Inbound" | "Outbound" } | null>(null), [overviewTransactionPage, setOverviewTransactionPage] = useState(0), [expandedRuleIndex, setExpandedRuleIndex] = useState<number | null>(null), [ruleDrillPage, setRuleDrillPage] = useState(0), [notice, setNotice] = useState("");
 const [overviewDraft, setOverviewDraft] = useState<OverviewMultiFilters>(emptyOverviewFilters), [appliedOverviewFilters, setAppliedOverviewFilters] = useState<OverviewMultiFilters>(emptyOverviewFilters);
+const [helpOpen, setHelpOpen] = useState(false);
 const [copyRuleId, setCopyRuleId] = useState("");
 const [assistantBusy, setAssistantBusy] = useState(false), [assistantStatus, setAssistantStatus] = useState("Publish a snapshot after changing transactions. Download JSON works without an online connection.");
 const [hydrated, setHydrated] = useState(false), [storageError, setStorageError] = useState(""), [saving, setSaving] = useState(false);
@@ -417,8 +421,9 @@ return <main className="shell" data-category-filter={categorySlice}>
 <button className={`nav ${view === "master" ? "active" : ""}`} onClick={() => setView("master")}><span>▦</span>Master Data</button>
 </nav>
 <div className="sideBottom">
-<button className="nav">
-<span>?</span>Help & Security</button>
+<button className="nav" onClick={() => { setHelpOpen(true); document.getElementById("tab-help-toggle")?.focus(); document.getElementById("tab-help")?.scrollIntoView({ block: "start", behavior: "smooth" }); }}>
+<span>?</span>How To Use</button>
+<form className="signOutForm" action="/auth/logout" method="post" onSubmit={event => { if ((saving || storageError || Object.keys(drafts).length > 0) && !window.confirm("You have unsaved changes or transaction drafts. Sign out anyway? Saved history stays on this device.")) event.preventDefault(); }}><button type="submit">Sign Out</button></form>
 <div className="profile">
 <div className="avatar">JB</div>
 <div>
@@ -434,6 +439,7 @@ return <main className="shell" data-category-filter={categorySlice}>
 <span>✓</span>
 {notice}<button onClick={() => setNotice("")}>×</button>
 </div>}
+<TabHelp view={view} open={helpOpen} onToggle={() => setHelpOpen(value => !value)}/>
 <datalist id="place-options">{allPlaces.map(place => <option key={place} value={place}/>)}</datalist>
 {view === "master" && <section className="assistantOutputPanel" aria-labelledby="assistant-output-title"><div><h2 id="assistant-output-title">Personal Life Assistant Output</h2><p>All saved accounts and transactions · AUD · Private, read-only snapshot for your assistant.</p><p role="status">{assistantStatus}</p><small>Online output is a published copy, not a live sync or a full backup. After a reset, publish an empty snapshot below to clear that copy.</small></div><div className="assistantOutputActions"><button className="import" onClick={exportAssistantJson}>Download Assistant JSON</button><button className="secondaryButton" disabled={assistantBusy || saving || Boolean(storageError)} onClick={() => void publishAssistantOutput()}>{assistantBusy ? "Publishing…" : "Publish Assistant Output"}</button><button className="secondaryButton" disabled={assistantBusy} onClick={() => void publishAssistantOutput(true)}>Clear Published Output</button></div></section>}
 {view === "overview" ? <>

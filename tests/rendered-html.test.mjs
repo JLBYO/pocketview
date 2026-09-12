@@ -2,24 +2,36 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
+async function render(path = "/", authEnv = {}, extraHeaders = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    new Request(`http://localhost${path}`, { headers: { accept: "text/html", ...extraHeaders } }),
+    { ...authEnv, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
 }
 
-test("serves the Pocketview application", async () => {
+test("unconfigured production worker keeps the Pocketview workspace locked", async () => {
   const response = await render();
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 503);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /Pocketview/i);
+  assert.match(html, /workspace remains locked/);
+  assert.doesNotMatch(html, /Money In And Out Over Time/);
+});
+
+test("configured production worker exposes login but gates documents and APIs", async () => {
+  const env = { SUPABASE_URL: "https://example.supabase.co", SUPABASE_PUBLISHABLE_KEY: "synthetic-key", POCKETVIEW_OWNER_ID: "synthetic-owner", POCKETVIEW_OWNER_EMAIL: "owner@example.test", POCKETVIEW_DATA_OWNER: "synthetic-storage" };
+  const login = await render("/login", env);
+  assert.equal(login.status, 200); assert.match(await login.text(), /name="password"/);
+  const document = await render("/", env);
+  assert.equal(document.status, 303); assert.match(document.headers.get("location"), /^\/login/);
+  const api = await render("/api/v1/assistant", env, { "oai-authenticated-user-id": "synthetic-owner" });
+  assert.equal(api.status, 401); assert.equal(api.headers.get("cache-control"), "private, no-store");
 });
 
 test("keeps transaction classification user-driven", async () => {

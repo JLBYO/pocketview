@@ -1,7 +1,8 @@
 # Verification — Incremental History And Assistant Output
 
 Run `pnpm lint`, `pnpm typecheck` and `pnpm test`. The test command builds production
-output and runs Node's built-in test runner. All 31 tests passed on 12 September 2026.
+output and runs Node's built-in test runner. The original history review passed 31
+tests; the shared-login update passes 40 tests on 12 September 2026.
 
 Regression coverage includes strict CSV dates/amounts and multiline quoting,
 account-aware overlap matching, legitimate repeats, late records, immutable saved
@@ -27,3 +28,17 @@ conditional on trusted Sites authentication; no real financial snapshot was
 uploaded during testing. Automated cross-app consumption and Drive/OneDrive sync
 are not implemented. The final browser reset check was inconclusive because the
 browser control connection timed out; storage reset is covered by executable tests.
+
+## Shared Login And Tab Guides
+
+The additional checks cover all six contextual guides, owner-only authentication,
+forged-header rejection, login/logout CSRF checks, secure cookies, session renewal,
+missing-configuration failure, and the compiled Worker's anonymous route boundary.
+A browser test with a synthetic provider exercised the actual production bundle:
+sign-in, session check, workspace opening, contextual guides, sign-out and blocked
+re-entry afterward. Help was checked at desktop and 390 px widths without overflow.
+The login form's referrer policy preserves the Origin needed for same-origin POST
+validation; this browser-discovered regression is now asserted in tests.
+
+The real owner's password was not read or used. Production identity configuration
+was matched to the shared provider's confirmed owner record without modifying it.

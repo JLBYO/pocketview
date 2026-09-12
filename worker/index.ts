@@ -3,8 +3,10 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { assistantApi } from "./assistant-api";
 import type { SnapshotBucket } from "./assistant-api";
+import { accountGate, applySessionHeaders } from "./account-auth";
+import type { AccountEnv } from "./account-auth";
 
-interface Env {
+interface Env extends AccountEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   BUCKET?: SnapshotBucket;
@@ -31,20 +33,22 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/api/v1/assistant") return assistantApi(request, env.BUCKET);
+    const auth = await accountGate(request, env);
+    if (auth.response) return applySessionHeaders(auth.response, auth.cookies);
+    if (url.pathname === "/api/v1/assistant") return applySessionHeaders(await assistantApi(request, env.BUCKET, auth.owner), auth.cookies);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
+      return applySessionHeaders(await handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
-      }, allowedWidths);
+      }, allowedWidths), auth.cookies);
     }
 
-    return handler.fetch(request, env, ctx);
+    return applySessionHeaders(await handler.fetch(request, env, ctx), auth.cookies);
   },
 };
 

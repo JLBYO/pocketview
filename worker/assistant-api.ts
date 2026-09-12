@@ -8,11 +8,9 @@ export type SnapshotBucket = {
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", ...headers } });
 
-export async function assistantApi(request: Request, bucket?: SnapshotBucket): Promise<Response> {
-    // Sites dispatch supplies this identity after applying the existing private audience policy.
-    // Never expose this handler on a deployment that allows clients to forge that header.
-    const user = request.headers.get("oai-authenticated-user-id");
-    if (!user) return json({ error: "ChatGPT sign-in is required." }, 401);
+export async function assistantApi(request: Request, bucket?: SnapshotBucket, user?: string): Promise<Response> {
+    // Only the server-side account gate supplies the verified storage owner.
+    if (!user) return json({ error: "Pocketview sign-in is required." }, 401);
     if (!["GET", "PUT"].includes(request.method)) return json({ error: "Method not allowed." }, 405, { Allow: "GET, PUT" });
     if (!bucket) return json({ error: "Assistant output storage is unavailable. Download Assistant JSON instead." }, 503);
     const bytes = new TextEncoder().encode(user);

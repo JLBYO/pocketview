@@ -34,12 +34,19 @@ publication. Nothing publishes automatically. `PUT` is same-origin, authenticate
 validated and conditional (`If-Match`, or `If-None-Match: *` for first publication).
 Conflicts return 409. Maximum snapshot size: 20 MB / 50,000 transactions.
 
-Sites' existing private audience and dispatched identity are required. **An
-arbitrary bearer token does not grant access through Sites dispatch.** Never make
-the Site public or share the owner's platform bypass token to connect another app.
-Cross-site automated access requires a supported authenticated integration; until
-configured and tested, use JSON file import in the assistant. Publishing alone
-does not connect the assistant. No CORS access is enabled.
+Pocketview now uses the same Supabase email/password account as the Personal Life
+Assistant, with a separate server-side owner gate. Browser requests use secure,
+HttpOnly session cookies. A server-side consumer may send an owner access token
+from the configured Supabase project as `Authorization: Bearer …`; Pocketview
+verifies it with the provider and requires the configured owner ID and confirmed
+email. Never copy tokens into source code or share platform bypass credentials.
+Client-supplied Sites identity headers are ignored. The server maps the approved
+owner to the existing R2 namespace, preserving prior published output.
+
+The login page is public; workspace routes and output remain authenticated.
+Publishing alone does not connect the assistant. Use JSON import until an automated
+consumer has been configured and tested. No CORS access is enabled. Publishing
+still requires a same-origin request and a revision precondition.
 
 This is an output copy, not a full recovery backup: no learning rules, budgets,
 audit snapshots or original CSV files are published. Use encrypted history backups

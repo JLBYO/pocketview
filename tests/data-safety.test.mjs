@@ -17,7 +17,8 @@ async function load(path, dependencies = {}) {
 const csv = await load("../app/csv-import.ts");
 const merge = await load("../app/incremental-import.ts");
 const output = await load("../app/assistant-output.ts", { "./csv-import": csv });
-const { assistantApi } = await load("../worker/assistant-api.ts", { "../app/assistant-output": output });
+const { assistantApi: rawAssistantApi } = await load("../worker/assistant-api.ts", { "../app/assistant-output": output });
+const assistantApi = (request, storage) => rawAssistantApi(request, storage, request.headers.get("oai-authenticated-user-id") || undefined);
 const audit = await load("../app/audit-history.ts");
 const { validateWorkspaceState, validateWorkspaceAudit } = await load("../app/workspace-validation.ts", { "./csv-import": csv });
 const transaction = (patch = {}) => ({ id: "synthetic-1", bank: "Example Bank", account: "Everyday", date: "12/09/2026", amount: -10.15, description: "EXAMPLE SHOP", note: "", merchant: "Example", category: "Food", detail: "Groceries", place: "", importId: "synthetic-import", sourceFile: "synthetic.csv", ...patch });
