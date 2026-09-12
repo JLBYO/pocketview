@@ -36,6 +36,14 @@ export async function assistantApi(request: Request, bucket?: SnapshotBucket, us
         let payload;
         try { payload = validateAssistantOutput(JSON.parse(new TextDecoder().decode(body))); }
         catch { return json({ error: "Invalid Pocketview snapshot. No published data was changed." }, 400); }
+        if (payload.schemaVersion === 2) {
+            const current = await bucket.get(key);
+            if (current) {
+                const previous = JSON.parse(await current.text());
+                if (Date.parse(payload.generatedAt) < Date.parse(previous.generatedAt)) return json({ error: "This export is older than the published snapshot. Check your device clock and export again." }, 409);
+                if (payload.snapshotId === previous.snapshotId && JSON.stringify(payload) !== JSON.stringify(previous)) return json({ error: "This snapshot ID was already used for different content. Export a fresh snapshot." }, 409);
+            }
+        }
         const condition = new Headers(match ? { "If-Match": match } : { "If-None-Match": "*" });
         const result = await bucket.put(key, JSON.stringify(payload), { onlyIf: condition, httpMetadata: { contentType: "application/json" } });
         if (!result) return json({ error: "The published snapshot changed on another device. Reload its status before publishing again." }, 409);

@@ -16,7 +16,8 @@ async function load(path, dependencies = {}) {
 }
 const csv = await load("../app/csv-import.ts");
 const merge = await load("../app/incremental-import.ts");
-const output = await load("../app/assistant-output.ts", { "./csv-import": csv });
+const plan = await load("../app/financial-plan.ts"), safety = await load("../app/output-safety.ts");
+const output = await load("../app/assistant-output.ts", { "./csv-import": csv, "./financial-plan": plan, "./output-safety": safety });
 const { assistantApi: rawAssistantApi } = await load("../worker/assistant-api.ts", { "../app/assistant-output": output });
 const assistantApi = (request, storage) => rawAssistantApi(request, storage, request.headers.get("oai-authenticated-user-id") || undefined);
 const audit = await load("../app/audit-history.ts");

@@ -1,4 +1,7 @@
 import { bankDate } from "./csv-import";
+import { exactFields, realIsoDate, validateFinancialPlan } from "./financial-plan";
+import type { FinancialPlan } from "./financial-plan";
+import { containsOutputCredential } from "./output-safety";
 
 export type OutputTransaction = {
     id: string; bank: string; account: string; date: string; amount: number;
@@ -36,12 +39,46 @@ export function buildAssistantOutput(rows: OutputTransaction[], generatedAt = ne
     };
 }
 
-export type AssistantOutput = ReturnType<typeof buildAssistantOutput>;
+export type AssistantOutputV1 = ReturnType<typeof buildAssistantOutput>;
+export type AssistantOutputV2 = Omit<AssistantOutputV1, "schemaVersion"> & { schemaVersion: 2; financialPlan: FinancialPlan };
+export type AssistantOutput = AssistantOutputV1 | AssistantOutputV2;
+
+/** V1 stays available; v2 adds a validated plan without changing raw movement totals. */
+export function buildAssistantOutputV2(rows: OutputTransaction[], financialPlan: FinancialPlan, generatedAt = new Date().toISOString()): AssistantOutputV2 {
+    return validateOutputV2({ ...buildAssistantOutput(rows, generatedAt), schemaVersion: 2, financialPlan });
+}
+
+const transactionFields = ["id", "bank", "accountName", "date", "amountCents", "direction", "merchant", "category", "categoryDetail", "place", "description", "extendedDetails", "sourceFile", "importId", "needsReview"];
+const totalFields = ["transactionCount", "inboundCents", "outboundCents", "netCents", "needsReviewCount"];
+function validateOutputV2(value: unknown): AssistantOutputV2 {
+    exactFields(value, ["schemaVersion", "source", "kind", "snapshotId", "generatedAt", "currency", "complete", "scope", "transfersExcluded", "dateRange", "totals", "transactions", "financialPlan"], "v2 snapshot");
+    const encoded = JSON.stringify(value);
+    if (new TextEncoder().encode(encoded).byteLength > 12 * 1024 * 1024) throw new Error("V2 assistant snapshots must be no larger than 12 MiB.");
+    if (containsOutputCredential(encoded)) throw new Error("Remove credentials, passwords and recovery codes before exporting. Nothing was published.");
+    if (value.schemaVersion !== 2 || typeof value.snapshotId !== "string" || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value.snapshotId) || typeof value.generatedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value.generatedAt) || !realIsoDate(value.generatedAt.slice(0, 10)) || !Number.isFinite(Date.parse(value.generatedAt)) || Date.parse(value.generatedAt) > Date.now() + 300000 || Number(value.generatedAt.slice(11, 13)) >= 24 || Number(value.generatedAt.slice(14, 16)) >= 60 || Number(value.generatedAt.slice(17, 19)) >= 60) throw new Error("Invalid snapshot identity or export time; check your device clock.");
+    exactFields(value.dateRange, ["from", "to"], "date range"); exactFields(value.totals, totalFields, "totals");
+    if (!Array.isArray(value.transactions) || value.transactions.length > 50000) throw new Error("At most 50,000 transactions can be exported.");
+    for (const row of value.transactions) {
+        exactFields(row, transactionFields, "transaction");
+        for (const field of transactionFields.filter(field => !["amountCents", "needsReview"].includes(field))) if (typeof row[field] !== "string" || (row[field] as string).length > 12000 || (row[field] as string).includes("\0")) throw new Error("Invalid transaction text.");
+        if (!(row.id as string).trim() || (row.id as string).length > 256 || !realIsoDate(row.date) || typeof row.amountCents !== "number" || row.direction !== (row.amountCents >= 0 ? "Inbound" : "Outbound") || typeof row.needsReview !== "boolean") throw new Error("Invalid transaction identity, date or direction.");
+        if (new TextEncoder().encode(JSON.stringify(row)).byteLength > 56000) throw new Error("A transaction exceeds the assistant's text limit; shorten its notes.");
+    }
+    const base = validateAssistantOutput({ ...value, schemaVersion: 1 });
+    if (totalFields.some(field => (value.totals as Record<string, unknown>)[field] !== base.totals[field as keyof typeof base.totals]) || value.dateRange.from !== base.dateRange.from || value.dateRange.to !== base.dateRange.to) throw new Error("Snapshot totals or dates do not match its transactions.");
+    const originalRows = new Map(value.transactions.map(row => [row.id, row]));
+    if (base.transactions.some(row => row.needsReview !== originalRows.get(row.id)?.needsReview)) throw new Error("Transaction review flags do not match the saved details.");
+    const financialPlan = validateFinancialPlan(value.financialPlan, base.transactions, value.generatedAt);
+    // Preserve export identity/time across publication and GET for consumer stale/idempotency checks.
+    const transactions = base.transactions.map(row => ({ ...row, category: originalRows.get(row.id)!.category as string }));
+    return { ...base, transactions, schemaVersion: 2, snapshotId: value.snapshotId, generatedAt: value.generatedAt, financialPlan };
+}
 
 /** Validate and rebuild server-side; never accept supplied totals or coercive values. */
 export function validateAssistantOutput(value: unknown): AssistantOutput {
     if (!value || typeof value !== "object") throw new Error("Expected a Pocketview snapshot.");
     const data = value as Record<string, unknown>;
+    if (data.schemaVersion === 2) return validateOutputV2(data);
     if (data.schemaVersion !== 1 || data.source !== "pocketview" || data.kind !== "transaction_snapshot" || data.currency !== "AUD" || data.complete !== true || data.scope !== "all_saved_transactions" || data.transfersExcluded !== false || !Array.isArray(data.transactions) || data.transactions.length > 50000) throw new Error("Unsupported Pocketview snapshot.");
     const rows = data.transactions.map((entry: unknown) => {
         if (!entry || typeof entry !== "object") throw new Error("Invalid transaction.");

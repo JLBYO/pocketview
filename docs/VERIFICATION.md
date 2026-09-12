@@ -1,5 +1,19 @@
 # Verification — Incremental History And Assistant Output
 
+## V2 Financial Plan Output
+
+On 12 September 2026, the v2 update passed typechecking, the production build and
+87 automated tests. One optional cross-repository test is skipped in the normal
+suite; it was also run separately against the receiving app's actual validator,
+where all 40 financial-output tests passed using synthetic data only.
+
+Coverage includes v1 compatibility, exact v2 fields, cent limits, Sydney dates,
+unset/zero savings targets, stable recurring IDs, unconfirmed transfers, no wage
+inference, empty-plan clearing, private conditional publication, stale and reused
+snapshot IDs, review flags, credentials and oversized snapshots. No real financial
+snapshot was read or published. Browser QA was not repeated for this contract
+update; the compiled Worker login/authentication tests remain part of the suite.
+
 Run `pnpm lint`, `pnpm typecheck` and `pnpm test`. The test command builds production
 output and runs Node's built-in test runner. The original history review passed 31
 tests; the shared-login update passes 40 tests on 12 September 2026.
