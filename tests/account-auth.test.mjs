@@ -93,3 +93,13 @@ test("logout is same-origin POST, revokes only this login, and clears both cooki
     for (const cookie of result.response.headers.getSetCookie()) assert.match(cookie, /Max-Age=0/);
     assert.match(result.response.headers.get("location"), /signedout/);
 });
+
+test("recovery is an accessible local form and fails closed without a trusted destination", async () => {
+    assert.match(await login.loginPage(null, true, env.PERSONAL_ASSISTANT_LOGIN_URL).text(), /href="\/recover"/);
+    const page = await auth.accountGate(req("/recover"), env, backend);
+    const html = await page.response.text();
+    assert.match(html, /action="\/auth\/recover"/); assert.match(html, /Send Recovery Email/);
+    assert.match(html, /select <strong>Password<\/strong>/); assert.doesNotMatch(html, /name="password"/);
+    assert.equal(login.loginPage(null, true, "javascript:alert(1)", "recover").status, 503);
+    assert.equal((await auth.accountGate(req("/auth/recover"), env, backend)).response.status, 405);
+});

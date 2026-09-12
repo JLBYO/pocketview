@@ -1,4 +1,4 @@
-import { loginPage } from "./login-page";
+import { loginPage, recoveryDestination } from "./login-page";
 
 export type AccountEnv = {
     SUPABASE_URL?: string;
@@ -25,7 +25,24 @@ export function accountConfigured(env: AccountEnv): boolean {
 }
 
 async function authRequest(env: AccountEnv, path: string, backend: AuthFetch, init: RequestInit = {}): Promise<Response> {
-    return backend(`${env.SUPABASE_URL}/auth/v1${path}`, { ...init, signal: AbortSignal.timeout(10000), redirect: "error", headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY!, "Content-Type": "application/json", ...init.headers } });
+    try {
+        // Workers rejects redirect: "error" before making a request. Never follow a
+        // redirect carrying passwords/tokens; inspect the manual response instead.
+        const response = await backend(`${env.SUPABASE_URL}/auth/v1${path}`, { ...init, signal: AbortSignal.timeout(10000), redirect: "manual", headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY!, "Content-Type": "application/json", ...init.headers } });
+        if (response.status >= 300 && response.status < 400) throw new Error("Unexpected authentication redirect");
+        return response;
+    } catch (error) {
+        // Never log request bodies, credentials, tokens, emails or provider messages.
+        console.error(JSON.stringify({ event: "auth_transport_failure", operation: path.split("?")[0], kind: error instanceof Error && ["TypeError", "TimeoutError", "AbortError"].includes(error.name) ? error.name : "RequestError" }));
+        throw error;
+    }
+}
+
+async function failureReason(response: Response): Promise<string> {
+    let code = "unknown";
+    try { const body = await response.json() as { error_code?: unknown }; if (typeof body.error_code === "string" && /^[a-z_]{1,60}$/.test(body.error_code)) code = body.error_code; } catch { /* Provider may return a non-JSON outage response. */ }
+    console.error(JSON.stringify({ event: "auth_provider_failure", status: response.status, code }));
+    return response.status === 429 ? code === "over_email_send_rate_limit" ? "quota" : "limited" : response.status >= 500 ? "unavailable" : "invalid";
 }
 
 async function verifyOwner(access: string, env: AccountEnv, backend: AuthFetch): Promise<Owner | null> {
@@ -49,8 +66,9 @@ export async function accountGate(request: Request, env: AccountEnv, backend: Au
     const path = new URL(request.url).pathname, sameOrigin = request.headers.get("origin") === new URL(request.url).origin;
     const configured = accountConfigured(env);
     if (path === "/login" && request.method === "GET") return { response: loginPage(new URL(request.url).searchParams.get("reason"), configured, env.PERSONAL_ASSISTANT_LOGIN_URL), cookies: [] };
+    if (path === "/recover" && request.method === "GET") return { response: loginPage(new URL(request.url).searchParams.get("reason"), configured, env.PERSONAL_ASSISTANT_LOGIN_URL, "recover"), cookies: [] };
     if (!configured) return { response: path.startsWith("/api/") || path.startsWith("/auth/") ? json("Sign-in is not configured. Your private workspace remains locked.", 503) : loginPage(null, false), cookies: [] };
-    if (["/auth/login", "/auth/logout"].includes(path)) {
+    if (["/auth/login", "/auth/logout", "/auth/recover"].includes(path)) {
         if (request.method !== "POST") return { response: json("Method not allowed.", 405), cookies: [] };
         if (!sameOrigin) return { response: json("Use Pocketview to perform this action.", 403), cookies: [] };
         if (path === "/auth/logout") {
@@ -58,20 +76,30 @@ export async function accountGate(request: Request, env: AccountEnv, backend: Au
             if (access) { try { await authRequest(env, "/logout?scope=local", backend, { method: "POST", headers: { Authorization: `Bearer ${access}` } }); } catch { /* Always clear this browser's cookies, including during an outage. */ } }
             return { response: redirect("/login?reason=signedout", clearCookies()), cookies: [] };
         }
+        const recovering = path === "/auth/recover", returnPath = recovering ? "/recover" : "/login";
         try {
             if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) return { response: json("Expected a sign-in form.", 415), cookies: [] };
-            const reader = request.body?.getReader(); if (!reader) return { response: redirect("/login?reason=invalid"), cookies: [] };
+            const reader = request.body?.getReader(); if (!reader) return { response: redirect(`${returnPath}?reason=invalid`), cookies: [] };
             const chunks: Uint8Array[] = []; let length = 0;
             while (true) { const part = await reader.read(); if (part.done) break; length += part.value.length; if (length > 8192) { await reader.cancel(); return { response: json("Sign-in form too large.", 413), cookies: [] }; } chunks.push(part.value); }
             const bytes = new Uint8Array(length); let offset = 0; for (const part of chunks) { bytes.set(part, offset); offset += part.length; }
             const form = new URLSearchParams(new TextDecoder().decode(bytes)), email = (form.get("email") || "").trim(), password = form.get("password") || "";
+            if (recovering) {
+                const destination = recoveryDestination(env.PERSONAL_ASSISTANT_LOGIN_URL);
+                if (!destination) return { response: loginPage(null, false, undefined, "recover"), cookies: [] };
+                // No signup, account enumeration or client-controlled redirect destination.
+                if (email.toLowerCase() !== env.POCKETVIEW_OWNER_EMAIL!.toLowerCase()) return { response: redirect("/recover?reason=requested"), cookies: [] };
+                const response = await authRequest(env, `/recover?redirect_to=${encodeURIComponent(destination)}`, backend, { method: "POST", body: JSON.stringify({ email }) });
+                if (!response.ok) { const reason = await failureReason(response); return { response: redirect(`/recover?reason=${reason === "invalid" ? "unavailable" : reason}`), cookies: [] }; }
+                return { response: redirect("/recover?reason=requested"), cookies: [] };
+            }
             if (email.toLowerCase() !== env.POCKETVIEW_OWNER_EMAIL!.toLowerCase() || !password || password.length > 1024) return { response: redirect("/login?reason=invalid"), cookies: [] };
             const response = await authRequest(env, "/token?grant_type=password", backend, { method: "POST", body: JSON.stringify({ email, password }) });
-            if (!response.ok) return { response: redirect(`/login?reason=${response.status === 429 ? "limited" : response.status >= 500 ? "unavailable" : "invalid"}`), cookies: [] };
+            if (!response.ok) return { response: redirect(`/login?reason=${await failureReason(response)}`), cookies: [] };
             const { session, cookies } = sessionCookies(await response.json());
             if (!await verifyOwner(session.access_token, env, backend)) return { response: redirect("/login?reason=invalid", clearCookies()), cookies: [] };
             return { response: redirect("/", cookies), cookies: [] };
-        } catch { return { response: redirect("/login?reason=unavailable"), cookies: [] }; }
+        } catch { return { response: redirect(`${returnPath}?reason=unavailable`), cookies: [] }; }
     }
     if (path.startsWith("/auth/") && path !== "/auth/session") return { response: json("Not found.", 404), cookies: [] };
     try {

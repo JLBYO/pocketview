@@ -42,3 +42,21 @@ validation; this browser-discovered regression is now asserted in tests.
 
 The real owner's password was not read or used. Production identity configuration
 was matched to the shared provider's confirmed owner record without modifying it.
+
+## Hosted Login And Recovery Regression
+
+The earlier synthetic browser harness used Node fetch, which did not detect that
+Cloudflare rejects `redirect: "error"` before contacting the provider. This was
+reproduced in Wrangler's actual Worker runtime. Authentication now uses manual
+redirect handling and rejects all 3xx responses without forwarding credentials.
+
+`tests/worker-auth.test.mjs` loads the compiled production Worker into Miniflare
+with production compatibility flags and ESM module rules. It exercises password
+login, secure cookies, session refresh, invalid credentials, forbidden redirects,
+approved-email recovery, destination tampering, CSRF and email sending quotas.
+The full suite now contains 48 passing tests, including these runtime cases.
+
+Recovery now starts with a local Pocketview form. The shared provider sends the
+email and the existing assistant handles its verified password-update callback.
+Provider acceptance does not prove inbox delivery; the owner must open the newest
+email and set their password themselves. Tests never change a real password.

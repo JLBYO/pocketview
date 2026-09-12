@@ -2,8 +2,13 @@
 
 Pocketview's public sign-in page uses the same approved email/password account as
 the Personal Life Assistant. There is no public registration or second password
-database. Password setup/recovery opens the existing assistant login in a new tab.
-Return to Pocketview afterward and sign in with the updated shared password.
+database. Password setup/recovery opens Pocketview's `/recover` form. It sends a
+recovery email through the shared provider, using only the approved account and
+the server-configured assistant callback. The newest email link opens the
+assistant's password form; if its dashboard appears, select **Password** in the
+status bar. Return to Pocketview and sign in with the updated shared password.
+Email failures and sending quotas are shown explicitly; sending is never retried
+automatically. No password is changed just by requesting an email.
 
 ## Server Boundary
 
@@ -18,6 +23,12 @@ Runtime configuration is held in Sites environment settings, not committed:
 - `POCKETVIEW_OWNER_ID`, `POCKETVIEW_OWNER_EMAIL`: the approved owner allowlist.
 - `POCKETVIEW_DATA_OWNER`: the previous Pocketview storage owner, retained unchanged.
 - `PERSONAL_ASSISTANT_LOGIN_URL`: the verified recovery entry point.
+
+Provider requests use Workers-compatible `redirect: "manual"` and reject all
+redirect responses without forwarding credentials. Runtime regressions are tested
+against the compiled Worker in Wrangler's local Cloudflare runtime, in addition to
+Node unit tests. Error logs contain only operation/status/code, never credentials,
+account emails, provider messages, or transaction data.
 
 Missing configuration locks the application. Deploy and test the guarded version
 before changing the outer Sites audience to public. Public assets must never
